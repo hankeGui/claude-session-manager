@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const projectsRouter = require('./src/routes/projects');
 const sessionsRouter = require('./src/routes/sessions');
 const searchRouter = require('./src/routes/search');
@@ -9,7 +10,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve React build if available, otherwise fall back to legacy public/
+const clientDist = path.join(__dirname, 'client', 'dist');
+const publicDir = path.join(__dirname, 'public');
+const staticDir = fs.existsSync(clientDist) ? clientDist : publicDir;
+app.use(express.static(staticDir));
 
 app.use('/api/projects', projectsRouter);
 app.use('/api/sessions', sessionsRouter);
@@ -29,6 +35,11 @@ app.get('/api/stats', (req, res) => {
     oldestSession: allSessions.length ? allSessions.reduce((a, b) => a.created < b.created ? a : b).created : null,
     newestSession: allSessions.length ? allSessions.reduce((a, b) => a.modified > b.modified ? a : b).modified : null,
   });
+});
+
+// SPA fallback - serve index.html for non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(staticDir, 'index.html'));
 });
 
 async function start() {

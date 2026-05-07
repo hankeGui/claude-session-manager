@@ -17,23 +17,33 @@ As you work with Claude Code across many projects, sessions accumulate quickly a
 - **Empty detection** — automatically flags cleared/abandoned sessions for cleanup
 - **Dark theme** — easy on the eyes
 
-## Installation
+## Quick Start
+
+```bash
+# Run directly (no install needed)
+npx claude-session-manager
+
+# Or install globally
+npm install -g claude-session-manager
+csm
+```
+
+## Development
 
 ```bash
 git clone https://github.com/hankeGui/claude-session-manager.git
 cd claude-session-manager
 npm install
-```
 
-## Usage
-
-```bash
+# Start the backend (serves built frontend)
 npm start
-# or specify a port:
-PORT=3456 npm start
+
+# Start Vite dev server with hot reload (proxies API to backend)
+# Run in one terminal: PORT=3456 npm start
+# Run in another: npm run dev
 ```
 
-Open http://localhost:3000 (or your custom port) in your browser.
+Open http://localhost:5173 (dev) or http://localhost:3000 (production) in your browser.
 
 ## How It Works
 
@@ -63,8 +73,9 @@ No database required. All data stays local.
 
 ## Tech Stack
 
-- **Backend**: Node.js + Express (single dependency)
-- **Frontend**: Vanilla HTML/CSS/JS (no build step)
+- **Frontend**: React + TypeScript + Tailwind CSS (Vite)
+- **State Management**: Zustand
+- **Backend**: Node.js + Express
 - **AI features**: Claude Code CLI (`claude -p`) for auto-rename and deep search
 
 ## Requirements

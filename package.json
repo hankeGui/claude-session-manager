@@ -8,7 +8,10 @@
     "csm": "./bin/cli.js"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "postinstall": "cd client && npm install && npm run build"
   },
   "keywords": [
     "claude",
@@ -29,6 +32,7 @@
   "files": [
     "bin/",
     "src/",
+    "client/",
     "public/",
     "server.js"
   ],

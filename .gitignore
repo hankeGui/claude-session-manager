@@ -1,3 +1,5 @@
 node_modules/
 session-titles.json
 .claude/
+client/dist/
+client/node_modules/
