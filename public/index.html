@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Session Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Claude Session Manager</h1>
+    <div class="header-actions">
+      <button id="btn-refresh" title="Refresh data">Refresh</button>
+      <span id="stats-badge"></span>
+    </div>
+  </header>
+
+  <div class="search-bar">
+    <input type="text" id="search-input" placeholder="Search sessions by summary, prompt, or branch...">
+    <select id="sort-field">
+      <option value="modified">Modified Time</option>
+      <option value="created">Created Time</option>
+      <option value="messageCount">Message Count</option>
+      <option value="diskSize">Context Size</option>
+    </select>
+    <select id="sort-order">
+      <option value="desc">Descending</option>
+      <option value="asc">Ascending</option>
+    </select>
+    <select id="filter-empty">
+      <option value="">All Sessions</option>
+      <option value="true">Empty Only</option>
+      <option value="false">Non-empty Only</option>
+    </select>
+  </div>
+
+  <main>
+    <aside id="sidebar">
+      <div class="sidebar-header">Projects</div>
+      <ul id="project-list"></ul>
+    </aside>
+
+    <section id="content">
+      <div id="content-header">
+        <h2 id="content-title">Select a project</h2>
+        <div id="batch-actions" class="hidden">
+          <button id="btn-select-all">Select All</button>
+          <button id="btn-select-empty">Select Empty</button>
+          <button id="btn-ai-rename-selected">AI Rename Selected</button>
+          <button id="btn-delete-selected" class="danger">Delete Selected (<span id="selected-count">0</span>)</button>
+        </div>
+      </div>
+      <div id="session-list"></div>
+    </section>
+  </main>
+
+  <!-- Session Detail Modal -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal">
+      <div id="modal-header">
+        <h3 id="modal-title">Session Detail</h3>
+        <button id="modal-close">&times;</button>
+      </div>
+      <div id="modal-meta"></div>
+      <div id="modal-toolbar">
+        <button id="btn-show-all" class="active">All</button>
+        <button id="btn-show-user">User Only</button>
+        <span id="modal-msg-count"></span>
+      </div>
+      <div id="modal-messages"></div>
+    </div>
+  </div>
+
+  <!-- Confirm Dialog -->
+  <div id="confirm-overlay" class="hidden">
+    <div id="confirm-dialog">
+      <p id="confirm-text"></p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel">Cancel</button>
+        <button id="confirm-ok" class="danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "claude-session-manager",
+  "version": "1.0.0",
+  "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "session-manager",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hankeGui/claude-session-manager.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
