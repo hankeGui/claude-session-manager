@@ -1,16 +1,18 @@
-const { Router } = require('express');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const scanner = require('../services/scanner');
-const { sessionJsonlPath } = require('../utils/paths');
+import { Router, Request, Response } from 'express';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import * as scanner from '../services/scanner';
+import { sessionJsonlPath } from '../utils/paths';
+import type { Session } from '../types';
 
 const router = Router();
 
-// GET /api/search?q=text&project=dirName&branch=name&empty=true
-router.get('/', (req, res) => {
-  const { q, project, branch, empty } = req.query;
+router.get('/', (req: Request, res: Response) => {
+  const { q, project, branch, empty } = req.query as {
+    q?: string; project?: string; branch?: string; empty?: string;
+  };
   const data = scanner.getData();
-  let results = [];
+  const results: (Session & { projectDisplayName: string; projectPath: string })[] = [];
 
   for (const p of data.projects) {
     if (project && p.dirName !== project) continue;
@@ -38,14 +40,11 @@ router.get('/', (req, res) => {
     }
   }
 
-  // Sort by modified desc
   results.sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
-
   res.json({ results, total: results.length });
 });
 
-// POST /api/search/deep - AI-powered deep search through session content
-router.post('/deep', (req, res) => {
+router.post('/deep', (req: Request, res: Response) => {
   const { q } = req.body;
   if (!q) {
     return res.status(400).json({ error: 'Query required' });
@@ -53,25 +52,23 @@ router.post('/deep', (req, res) => {
 
   const data = scanner.getData();
 
-  // Build a summary of all sessions for Claude to analyze
-  const sessionSummaries = [];
+  const sessionSummaries: any[] = [];
   for (const p of data.projects) {
     for (const session of p.sessions) {
-      // Read first few lines of each session to get context
       let snippet = '';
       try {
         const filePath = sessionJsonlPath(session.dirName, session.sessionId);
         const content = fs.readFileSync(filePath, 'utf-8');
         const lines = content.split('\n');
-        const userMsgs = [];
+        const userMsgs: string[] = [];
         for (const line of lines) {
           if (!line.includes('"type":"user"')) continue;
           try {
             const obj = JSON.parse(line);
-            if (obj.type === 'user' && obj.message && obj.message.content) {
+            if (obj.type === 'user' && obj.message?.content) {
               const text = typeof obj.message.content === 'string'
                 ? obj.message.content
-                : obj.message.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
+                : obj.message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ');
               if (text.trim()) userMsgs.push(text.slice(0, 200));
             }
           } catch {}
@@ -107,15 +104,15 @@ Output format: ["id1", "id2", ...]`;
 
   let stdout = '';
   let stderr = '';
-  child.stdout.on('data', (chunk) => { stdout += chunk; });
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.stdout.on('data', (chunk: Buffer) => { stdout += chunk; });
+  child.stderr.on('data', (chunk: Buffer) => { stderr += chunk; });
 
-  child.on('close', (code) => {
+  child.on('close', (code: number | null) => {
     if (code !== 0) {
       return res.status(500).json({ error: 'AI search failed', detail: stderr || `exit code ${code}` });
     }
 
-    let matchedIds = [];
+    let matchedIds: string[] = [];
     try {
       const parsed = JSON.parse(stdout);
       if (Array.isArray(parsed)) {
@@ -124,15 +121,13 @@ Output format: ["id1", "id2", ...]`;
         matchedIds = JSON.parse(parsed.result);
       }
     } catch {
-      // Try to extract array from raw text
       const match = stdout.match(/\[[\s\S]*?\]/);
       if (match) {
         try { matchedIds = JSON.parse(match[0]); } catch {}
       }
     }
 
-    // Look up full session data for matched IDs
-    const results = [];
+    const results: (Session & { projectDisplayName: string; projectPath: string })[] = [];
     const idSet = new Set(matchedIds);
     for (const p of data.projects) {
       for (const session of p.sessions) {
@@ -149,7 +144,7 @@ Output format: ["id1", "id2", ...]`;
     res.json({ results, total: results.length, aiMatched: matchedIds.length });
   });
 
-  child.on('error', (err) => {
+  child.on('error', (err: Error) => {
     res.status(500).json({ error: 'Failed to spawn claude', detail: err.message });
   });
 
@@ -157,4 +152,4 @@ Output format: ["id1", "id2", ...]`;
   child.stdin.end();
 });
 
-module.exports = router;
+export default router;

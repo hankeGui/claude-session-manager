@@ -1,16 +1,15 @@
-const { Router } = require('express');
-const { exec } = require('child_process');
-const scanner = require('../services/scanner');
-const { readSessionMessages } = require('../services/session-reader');
-const { deleteSession, batchDelete } = require('../services/session-cleaner');
+import { Router, Request, Response } from 'express';
+import { exec } from 'child_process';
+import * as scanner from '../services/scanner';
+import { readSessionMessages } from '../services/session-reader';
+import { deleteSession, batchDelete } from '../services/session-cleaner';
 
 const router = Router();
 
-// GET /api/sessions/:sessionId/messages
-router.get('/:sessionId/messages', async (req, res) => {
+router.get('/:sessionId/messages', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
-  const limit = parseInt(req.query.limit) || 100;
-  const offset = parseInt(req.query.offset) || 0;
+  const limit = parseInt(req.query.limit as string) || 100;
+  const offset = parseInt(req.query.offset as string) || 0;
 
   const found = scanner.getSessionById(sessionId);
   if (!found) {
@@ -40,8 +39,7 @@ router.get('/:sessionId/messages', async (req, res) => {
   });
 });
 
-// DELETE /api/sessions/:sessionId
-router.delete('/:sessionId', async (req, res) => {
+router.delete('/:sessionId', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const result = await deleteSession(sessionId);
   if (!result.success) {
@@ -50,8 +48,7 @@ router.delete('/:sessionId', async (req, res) => {
   res.json(result);
 });
 
-// POST /api/sessions/batch-delete
-router.post('/batch-delete', async (req, res) => {
+router.post('/batch-delete', async (req: Request, res: Response) => {
   const { sessionIds } = req.body;
   if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
     return res.status(400).json({ error: 'sessionIds array required' });
@@ -60,8 +57,7 @@ router.post('/batch-delete', async (req, res) => {
   res.json(result);
 });
 
-// POST /api/sessions/:sessionId/auto-rename
-router.post('/:sessionId/auto-rename', (req, res) => {
+router.post('/:sessionId/auto-rename', (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
@@ -70,8 +66,6 @@ router.post('/:sessionId/auto-rename', (req, res) => {
 
   const { project } = found;
   const cwd = project.projectPath || process.env.HOME;
-
-  // Use claude -p with --resume to analyze the session and generate a title
   const prompt = 'Based on the conversation history in this session, generate a short descriptive title (under 50 characters, in the same language as the conversation). Output ONLY the title text, nothing else.';
   const cmd = `claude -p "${prompt.replace(/"/g, '\\"')}" --resume ${sessionId} --no-session-persistence --bare`;
 
@@ -79,19 +73,16 @@ router.post('/:sessionId/auto-rename', (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Claude command failed', detail: stderr || err.message });
     }
-
     const title = stdout.trim().replace(/^["']|["']$/g, '');
     if (!title) {
       return res.status(500).json({ error: 'Claude returned empty title' });
     }
-
     scanner.setTitle(sessionId, title);
     res.json({ success: true, sessionId, title });
   });
 });
 
-// PUT /api/sessions/:sessionId/title
-router.put('/:sessionId/title', (req, res) => {
+router.put('/:sessionId/title', (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const { title } = req.body;
 
@@ -104,8 +95,7 @@ router.put('/:sessionId/title', (req, res) => {
   res.json({ success: true, sessionId, title: title || '' });
 });
 
-// POST /api/sessions/:sessionId/resume
-router.post('/:sessionId/resume', (req, res) => {
+router.post('/:sessionId/resume', (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
@@ -116,10 +106,10 @@ router.post('/:sessionId/resume', (req, res) => {
   const { skipPermissions } = req.body || {};
   const cwd = project.projectPath || process.env.HOME;
   const flags = skipPermissions ? ' --dangerously-skip-permissions' : '';
-  const cmd = `cd ${cwd.replace(/"/g, '\\"')} && claude${flags} --resume ${sessionId}`;
+  const cmd = `cd ${(cwd as string).replace(/"/g, '\\"')} && claude${flags} --resume ${sessionId}`;
   const terminal = process.env.TERM_PROGRAM || 'Apple_Terminal';
 
-  let script;
+  let script: string;
   if (terminal.includes('iTerm')) {
     script = `
       tell application "iTerm2"
@@ -131,7 +121,6 @@ router.post('/:sessionId/resume', (req, res) => {
       end tell
     `;
   } else {
-    // Default: macOS Terminal.app
     script = `
       tell application "Terminal"
         activate
@@ -148,4 +137,4 @@ router.post('/:sessionId/resume', (req, res) => {
   });
 });
 
-module.exports = router;
+export default router;

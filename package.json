@@ -2,15 +2,16 @@
   "name": "claude-session-manager",
   "version": "1.0.0",
   "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
-  "main": "server.js",
+  "main": "server.ts",
   "bin": {
-    "claude-session-manager": "./bin/cli.js",
-    "csm": "./bin/cli.js"
+    "claude-session-manager": "./bin/cli.ts",
+    "csm": "./bin/cli.ts"
   },
   "scripts": {
-    "start": "node server.js",
+    "start": "tsx server.ts",
     "dev": "cd client && npm run dev",
     "build": "cd client && npm run build",
+    "typecheck": "tsc --noEmit",
     "postinstall": "cd client && npm install && npm run build"
   },
   "keywords": [
@@ -33,10 +34,14 @@
     "bin/",
     "src/",
     "client/",
-    "public/",
-    "server.js"
+    "server.ts",
+    "tsconfig.json"
   ],
   "dependencies": {
-    "express": "^4.21.0"
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "express": "^4.21.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
   }
 }

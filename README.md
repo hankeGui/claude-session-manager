@@ -73,9 +73,9 @@ No database required. All data stays local.
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript + Tailwind CSS (Vite)
+- **Frontend**: React + TypeScript + Tailwind CSS (Vite 5)
 - **State Management**: Zustand
-- **Backend**: Node.js + Express
+- **Backend**: TypeScript + Express (runs via [tsx](https://github.com/privatenumber/tsx), no compile step)
 - **AI features**: Claude Code CLI (`claude -p`) for auto-rename and deep search
 
 ## Requirements

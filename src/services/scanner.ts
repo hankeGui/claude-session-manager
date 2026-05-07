@@ -1,14 +1,13 @@
-const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
-const { PROJECTS_DIR, CLAUDE_DIR, projectDirToDisplayName, sessionsIndexPath, sessionJsonlPath } = require('../utils/paths');
+import fs from 'fs';
+import path from 'path';
+import { PROJECTS_DIR, projectDirToDisplayName, sessionsIndexPath } from '../utils/paths';
+import type { Project, Session, ScannerData } from '../types';
 
-let data = { projects: [] };
+let data: ScannerData = { projects: [] };
 
-// Custom titles stored in a local JSON file
 const TITLES_FILE = path.join(__dirname, '..', '..', 'session-titles.json');
 
-function loadTitles() {
+function loadTitles(): Record<string, string> {
   try {
     return JSON.parse(fs.readFileSync(TITLES_FILE, 'utf-8'));
   } catch {
@@ -16,16 +15,11 @@ function loadTitles() {
   }
 }
 
-function saveTitles(titles) {
+function saveTitles(titles: Record<string, string>): void {
   fs.writeFileSync(TITLES_FILE, JSON.stringify(titles, null, 2));
 }
 
-function getTitle(sessionId) {
-  const titles = loadTitles();
-  return titles[sessionId] || '';
-}
-
-function setTitle(sessionId, title) {
+export function setTitle(sessionId: string, title: string): void {
   const titles = loadTitles();
   if (title) {
     titles[sessionId] = title;
@@ -33,20 +27,27 @@ function setTitle(sessionId, title) {
     delete titles[sessionId];
   }
   saveTitles(titles);
-  // Update in-memory data
   for (const project of data.projects) {
     const session = project.sessions.find(s => s.sessionId === sessionId);
     if (session) {
-      session.customTitle = title || '';
+      session.customTitle = title || null;
       break;
     }
   }
 }
 
-// UUID pattern for session filenames
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
 
-function isEmptySession(entry) {
+interface SessionMeta {
+  firstPrompt: string;
+  messageCount: number;
+  created: string | null;
+  modified: string | null;
+  gitBranch: string;
+  cwd: string;
+}
+
+function isEmptySession(entry: { firstPrompt?: string; messageCount?: number; summary?: string }): boolean {
   if (!entry.messageCount || entry.messageCount <= 1) return true;
   if (!entry.firstPrompt || entry.firstPrompt === 'No prompt') return true;
   if (entry.summary === 'User Exited CLI Session' || entry.summary === 'User Exited Claude Code CLI Session') return true;
@@ -54,9 +55,8 @@ function isEmptySession(entry) {
   return false;
 }
 
-// Extract metadata from JSONL file by reading first few meaningful lines
-function extractMetaFromJsonl(filePath) {
-  const meta = {
+function extractMetaFromJsonl(filePath: string): SessionMeta {
+  const meta: SessionMeta = {
     firstPrompt: '',
     messageCount: 0,
     created: null,
@@ -65,9 +65,8 @@ function extractMetaFromJsonl(filePath) {
     cwd: '',
   };
 
-  let content;
+  let content: string;
   try {
-    // Read first 50KB to get metadata quickly (enough for first few messages)
     const fd = fs.openSync(filePath, 'r');
     const buf = Buffer.alloc(50 * 1024);
     const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
@@ -80,7 +79,7 @@ function extractMetaFromJsonl(filePath) {
   const lines = content.split('\n').filter(l => l.trim());
 
   for (const line of lines) {
-    let obj;
+    let obj: any;
     try {
       obj = JSON.parse(line);
     } catch {
@@ -91,11 +90,11 @@ function extractMetaFromJsonl(filePath) {
       meta.messageCount++;
 
       if (obj.type === 'user' && !meta.firstPrompt) {
-        if (obj.message && obj.message.content) {
-          const content = typeof obj.message.content === 'string'
+        if (obj.message?.content) {
+          const msgContent = typeof obj.message.content === 'string'
             ? obj.message.content
-            : obj.message.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
-          meta.firstPrompt = content.slice(0, 200);
+            : obj.message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ');
+          meta.firstPrompt = msgContent.slice(0, 200);
         }
         if (obj.timestamp) meta.created = obj.timestamp;
         if (obj.gitBranch) meta.gitBranch = obj.gitBranch;
@@ -106,7 +105,6 @@ function extractMetaFromJsonl(filePath) {
     }
   }
 
-  // For full message count, do a quick scan of the entire file
   try {
     const full = fs.readFileSync(filePath, 'utf-8');
     const allLines = full.split('\n');
@@ -118,7 +116,6 @@ function extractMetaFromJsonl(filePath) {
     }
     meta.messageCount = totalMsgs;
 
-    // Get modified time from last message
     for (let i = allLines.length - 1; i >= 0; i--) {
       const l = allLines[i].trim();
       if (!l) continue;
@@ -135,16 +132,16 @@ function extractMetaFromJsonl(filePath) {
   return meta;
 }
 
-async function scan() {
-  const projects = [];
+export async function scan(): Promise<void> {
+  const projects: Project[] = [];
   const titles = loadTitles();
 
-  let dirs;
+  let dirs: string[];
   try {
     dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => d.name);
-  } catch (err) {
+  } catch (err: any) {
     console.error('Cannot read projects dir:', err.message);
     data = { projects: [] };
     return;
@@ -153,34 +150,30 @@ async function scan() {
   for (const dirName of dirs) {
     const projectDir = path.join(PROJECTS_DIR, dirName);
 
-    // Collect all JSONL session files in this directory
-    let jsonlFiles;
+    let jsonlFiles: string[];
     try {
-      jsonlFiles = fs.readdirSync(projectDir)
-        .filter(f => UUID_RE.test(f));
+      jsonlFiles = fs.readdirSync(projectDir).filter(f => UUID_RE.test(f));
     } catch {
       continue;
     }
 
     if (jsonlFiles.length === 0) continue;
 
-    // Read index if available
     const indexPath = sessionsIndexPath(dirName);
-    let index = { entries: [], originalPath: '' };
+    let index: { entries: any[]; originalPath: string } = { entries: [], originalPath: '' };
     try {
       index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       if (!index.entries) index.entries = [];
     } catch {}
 
-    // Build a map of indexed sessions
-    const indexedMap = new Map();
+    const indexedMap = new Map<string, any>();
     for (const entry of index.entries) {
       if (!entry.isSidechain) {
         indexedMap.set(entry.sessionId, entry);
       }
     }
 
-    const sessions = [];
+    const sessions: Session[] = [];
 
     for (const file of jsonlFiles) {
       const sessionId = file.replace('.jsonl', '');
@@ -193,36 +186,32 @@ async function scan() {
 
       const indexed = indexedMap.get(sessionId);
       if (indexed) {
-        // Use index metadata
         sessions.push({
           sessionId,
-          customTitle: titles[sessionId] || '',
-          firstPrompt: indexed.firstPrompt || '',
-          summary: indexed.summary || '',
+          customTitle: titles[sessionId] || null,
+          firstPrompt: indexed.firstPrompt || null,
+          summary: indexed.summary || null,
           messageCount: indexed.messageCount || 0,
-          created: indexed.created || null,
-          modified: indexed.modified || null,
-          gitBranch: indexed.gitBranch || '',
+          created: indexed.created || '',
+          modified: indexed.modified || '',
+          gitBranch: indexed.gitBranch || null,
           isEmpty: isEmptySession(indexed),
           diskSize,
-          fileExists: true,
           dirName,
         });
       } else {
-        // Extract metadata from JSONL file
         const meta = extractMetaFromJsonl(jsonlPath);
         sessions.push({
           sessionId,
-          customTitle: titles[sessionId] || '',
-          firstPrompt: meta.firstPrompt,
-          summary: '',
+          customTitle: titles[sessionId] || null,
+          firstPrompt: meta.firstPrompt || null,
+          summary: null,
           messageCount: meta.messageCount,
-          created: meta.created,
-          modified: meta.modified,
-          gitBranch: meta.gitBranch,
+          created: meta.created || '',
+          modified: meta.modified || '',
+          gitBranch: meta.gitBranch || null,
           isEmpty: isEmptySession({ firstPrompt: meta.firstPrompt, messageCount: meta.messageCount }),
           diskSize,
-          fileExists: true,
           dirName,
         });
       }
@@ -230,28 +219,24 @@ async function scan() {
       indexedMap.delete(sessionId);
     }
 
-    // Also add orphan index entries (no JSONL file)
     for (const [sessionId, entry] of indexedMap) {
       sessions.push({
         sessionId,
-        customTitle: titles[sessionId] || '',
-        firstPrompt: entry.firstPrompt || '',
-        summary: entry.summary || '',
+        customTitle: titles[sessionId] || null,
+        firstPrompt: entry.firstPrompt || null,
+        summary: entry.summary || null,
         messageCount: entry.messageCount || 0,
-        created: entry.created || null,
-        modified: entry.modified || null,
-        gitBranch: entry.gitBranch || '',
+        created: entry.created || '',
+        modified: entry.modified || '',
+        gitBranch: entry.gitBranch || null,
         isEmpty: true,
         diskSize: 0,
-        fileExists: false,
         dirName,
       });
     }
 
-    // Determine project path from index or from session metadata
     let projectPath = index.originalPath || '';
     if (!projectPath && sessions.length > 0) {
-      // Try to derive from cwd in first session's JSONL
       const firstFile = path.join(projectDir, jsonlFiles[0]);
       const meta = extractMetaFromJsonl(firstFile);
       projectPath = meta.cwd || '';
@@ -261,7 +246,6 @@ async function scan() {
       dirName,
       displayName: projectDirToDisplayName(dirName, projectPath),
       projectPath,
-      sessionCount: sessions.length,
       sessions,
     });
   }
@@ -270,15 +254,15 @@ async function scan() {
   data = { projects };
 }
 
-function getData() {
+export function getData(): ScannerData {
   return data;
 }
 
-function getProjectByDir(dirName) {
+export function getProjectByDir(dirName: string): Project | undefined {
   return data.projects.find(p => p.dirName === dirName);
 }
 
-function getSessionById(sessionId) {
+export function getSessionById(sessionId: string): { session: Session; project: Project } | null {
   for (const project of data.projects) {
     const session = project.sessions.find(s => s.sessionId === sessionId);
     if (session) return { session, project };
@@ -286,16 +270,13 @@ function getSessionById(sessionId) {
   return null;
 }
 
-function removeSession(sessionId) {
+export function removeSession(sessionId: string): boolean {
   for (const project of data.projects) {
     const idx = project.sessions.findIndex(s => s.sessionId === sessionId);
     if (idx !== -1) {
       project.sessions.splice(idx, 1);
-      project.sessionCount = project.sessions.length;
       return true;
     }
   }
   return false;
 }
-
-module.exports = { scan, getData, getProjectByDir, getSessionById, removeSession, setTitle };

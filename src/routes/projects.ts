@@ -1,16 +1,16 @@
-const { Router } = require('express');
-const scanner = require('../services/scanner');
+import { Router, Request, Response } from 'express';
+import * as scanner from '../services/scanner';
+import type { Session } from '../types';
 
 const router = Router();
 
-// GET /api/projects
-router.get('/', (req, res) => {
+router.get('/', (_req: Request, res: Response) => {
   const data = scanner.getData();
   const projects = data.projects.map(p => ({
     dirName: p.dirName,
     displayName: p.displayName,
     projectPath: p.projectPath,
-    sessionCount: p.sessionCount,
+    sessionCount: p.sessions.length,
     emptyCount: p.sessions.filter(s => s.isEmpty).length,
     totalMessages: p.sessions.reduce((sum, s) => sum + s.messageCount, 0),
     newestSession: p.sessions.length
@@ -20,10 +20,11 @@ router.get('/', (req, res) => {
   res.json({ projects });
 });
 
-// GET /api/projects/:dirName/sessions
-router.get('/:dirName/sessions', (req, res) => {
+router.get('/:dirName/sessions', (req: Request, res: Response) => {
   const { dirName } = req.params;
-  const { sort = 'modified', order = 'desc', empty } = req.query;
+  const { sort = 'modified', order = 'desc', empty } = req.query as {
+    sort?: string; order?: string; empty?: string;
+  };
 
   const project = scanner.getProjectByDir(dirName);
   if (!project) {
@@ -32,20 +33,19 @@ router.get('/:dirName/sessions', (req, res) => {
 
   let sessions = [...project.sessions];
 
-  // Filter
   if (empty === 'true') {
     sessions = sessions.filter(s => s.isEmpty);
   } else if (empty === 'false') {
     sessions = sessions.filter(s => !s.isEmpty);
   }
 
-  // Sort
   sessions.sort((a, b) => {
+    const field = sort as keyof Session;
     let cmp = 0;
     if (sort === 'modified' || sort === 'created') {
-      cmp = (a[sort] || '').localeCompare(b[sort] || '');
+      cmp = ((a[field] as string) || '').localeCompare((b[field] as string) || '');
     } else if (sort === 'messageCount' || sort === 'diskSize') {
-      cmp = (a[sort] || 0) - (b[sort] || 0);
+      cmp = ((a[field] as number) || 0) - ((b[field] as number) || 0);
     }
     return order === 'desc' ? -cmp : cmp;
   });
@@ -53,4 +53,4 @@ router.get('/:dirName/sessions', (req, res) => {
   res.json({ sessions, projectPath: project.projectPath, displayName: project.displayName });
 });
 
-module.exports = router;
+export default router;

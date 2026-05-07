@@ -1,10 +1,10 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 
-const { execSync } = require('child_process');
-const path = require('path');
+import { execSync } from 'child_process';
+import path from 'path';
 
 const PORT = process.env.PORT || 3000;
-process.env.PORT = PORT;
+process.env.PORT = String(PORT);
 
 // Check if claude CLI is available
 try {
@@ -18,7 +18,6 @@ try {
 const noOpen = process.argv.includes('--no-open');
 
 if (!noOpen) {
-  // Give the server a moment to start, then open browser
   setTimeout(() => {
     const url = `http://localhost:${PORT}`;
     try {
@@ -36,4 +35,4 @@ if (!noOpen) {
 }
 
 // Start the server
-require(path.join(__dirname, '..', 'server.js'));
+import(path.join(__dirname, '..', 'server.ts'));

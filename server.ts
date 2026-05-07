@@ -1,17 +1,16 @@
-const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const projectsRouter = require('./src/routes/projects');
-const sessionsRouter = require('./src/routes/sessions');
-const searchRouter = require('./src/routes/search');
-const scanner = require('./src/services/scanner');
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import projectsRouter from './src/routes/projects';
+import sessionsRouter from './src/routes/sessions';
+import searchRouter from './src/routes/search';
+import * as scanner from './src/services/scanner';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Serve React build if available, otherwise fall back to legacy public/
 const clientDist = path.join(__dirname, 'client', 'dist');
 const publicDir = path.join(__dirname, 'public');
 const staticDir = fs.existsSync(clientDist) ? clientDist : publicDir;
@@ -21,12 +20,9 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/search', searchRouter);
 
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', (_req, res) => {
   const data = scanner.getData();
-  const allSessions = [];
-  for (const project of data.projects) {
-    allSessions.push(...project.sessions);
-  }
+  const allSessions = data.projects.flatMap(p => p.sessions);
   const emptySessions = allSessions.filter(s => s.isEmpty);
   res.json({
     totalProjects: data.projects.length,
@@ -37,8 +33,8 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
-// SPA fallback - serve index.html for non-API routes
-app.get('*', (req, res) => {
+// SPA fallback
+app.get('*', (_req, res) => {
   res.sendFile(path.join(staticDir, 'index.html'));
 });
 
