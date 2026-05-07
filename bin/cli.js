@@ -1,7 +1,7 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 
-import { execSync } from 'child_process';
-import path from 'path';
+const { execSync, spawn } = require('child_process');
+const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 process.env.PORT = String(PORT);
@@ -28,11 +28,27 @@ if (!noOpen) {
       } else {
         execSync(`xdg-open "${url}"`, { stdio: 'ignore' });
       }
-    } catch {
-      // Silently fail if browser can't be opened
-    }
-  }, 1500);
+    } catch {}
+  }, 2000);
 }
 
-// Start the server
-import(path.join(__dirname, '..', 'server.ts'));
+// Start the server via tsx (bundled as dependency)
+const tsxBin = path.join(__dirname, '..', 'node_modules', '.bin', 'tsx');
+const serverPath = path.join(__dirname, '..', 'server.ts');
+
+const child = spawn(tsxBin, [serverPath], {
+  stdio: 'inherit',
+  env: { ...process.env, PORT: String(PORT) },
+});
+
+child.on('exit', (code) => {
+  process.exit(code || 0);
+});
+
+process.on('SIGINT', () => {
+  child.kill('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+  child.kill('SIGTERM');
+});

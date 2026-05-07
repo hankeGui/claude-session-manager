@@ -4,8 +4,8 @@
   "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
   "main": "server.ts",
   "bin": {
-    "claude-session-manager": "./bin/cli.ts",
-    "csm": "./bin/cli.ts"
+    "claude-session-manager": "./bin/cli.js",
+    "csm": "./bin/cli.js"
   },
   "scripts": {
     "start": "tsx server.ts",
