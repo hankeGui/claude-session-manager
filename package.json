@@ -1,6 +1,6 @@
 {
   "name": "claude-session-mgr",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
   "main": "server.ts",
   "bin": {
@@ -10,7 +10,7 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "cd client && npm run dev",
-    "build": "cd client && npm run build",
+    "build": "cd client && npm install && npm run build",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -32,7 +32,7 @@
   "files": [
     "bin/",
     "src/",
-    "client/",
+    "dist/",
     "server.ts",
     "tsconfig.json"
   ],
