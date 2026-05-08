@@ -1,10 +1,10 @@
 {
-  "name": "claude-session-manager",
+  "name": "claude-session-mgr",
   "version": "1.0.0",
   "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
   "main": "server.ts",
   "bin": {
-    "claude-session-manager": "./bin/cli.js",
+    "claude-session-mgr": "./bin/cli.js",
     "csm": "./bin/cli.js"
   },
   "scripts": {
