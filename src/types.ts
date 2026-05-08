@@ -17,6 +17,7 @@ export interface Session {
   gitBranch: string | null;
   diskSize: number;
   isEmpty: boolean;
+  emptyReason: string | null;
 }
 
 export interface SessionMessage {

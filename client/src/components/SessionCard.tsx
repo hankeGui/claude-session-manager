@@ -152,8 +152,8 @@ export default function SessionCard({ session, onView }: Props) {
             </span>
           )}
           {session.isEmpty && (
-            <span className="bg-warning text-black px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase">
-              Empty
+            <span className="bg-warning text-black px-1.5 py-0.5 rounded text-[10px] font-semibold">
+              Empty{session.emptyReason ? ` · ${session.emptyReason}` : ''}
             </span>
           )}
         </div>

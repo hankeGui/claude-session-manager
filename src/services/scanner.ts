@@ -47,12 +47,12 @@ interface SessionMeta {
   cwd: string;
 }
 
-function isEmptySession(entry: { firstPrompt?: string; messageCount?: number; summary?: string }): boolean {
-  if (!entry.messageCount || entry.messageCount <= 1) return true;
-  if (!entry.firstPrompt || entry.firstPrompt === 'No prompt') return true;
-  if (entry.summary === 'User Exited CLI Session' || entry.summary === 'User Exited Claude Code CLI Session') return true;
-  if (entry.firstPrompt && entry.firstPrompt.trim() === '/clear') return true;
-  return false;
+function getEmptyReason(entry: { firstPrompt?: string; messageCount?: number; summary?: string }): string | null {
+  if (!entry.messageCount || entry.messageCount <= 1) return 'No conversation';
+  if (!entry.firstPrompt || entry.firstPrompt === 'No prompt') return 'No prompt entered';
+  if (entry.summary === 'User Exited CLI Session' || entry.summary === 'User Exited Claude Code CLI Session') return 'Exited immediately';
+  if (entry.firstPrompt && entry.firstPrompt.trim() === '/clear') return 'Cleared';
+  return null;
 }
 
 function extractMetaFromJsonl(filePath: string): SessionMeta {
@@ -186,6 +186,7 @@ export async function scan(): Promise<void> {
 
       const indexed = indexedMap.get(sessionId);
       if (indexed) {
+        const emptyReason = getEmptyReason(indexed);
         sessions.push({
           sessionId,
           customTitle: titles[sessionId] || null,
@@ -195,12 +196,14 @@ export async function scan(): Promise<void> {
           created: indexed.created || '',
           modified: indexed.modified || '',
           gitBranch: indexed.gitBranch || null,
-          isEmpty: isEmptySession(indexed),
+          isEmpty: !!emptyReason,
+          emptyReason,
           diskSize,
           dirName,
         });
       } else {
         const meta = extractMetaFromJsonl(jsonlPath);
+        const emptyReason = getEmptyReason({ firstPrompt: meta.firstPrompt, messageCount: meta.messageCount });
         sessions.push({
           sessionId,
           customTitle: titles[sessionId] || null,
@@ -210,7 +213,8 @@ export async function scan(): Promise<void> {
           created: meta.created || '',
           modified: meta.modified || '',
           gitBranch: meta.gitBranch || null,
-          isEmpty: isEmptySession({ firstPrompt: meta.firstPrompt, messageCount: meta.messageCount }),
+          isEmpty: !!emptyReason,
+          emptyReason,
           diskSize,
           dirName,
         });
@@ -230,6 +234,7 @@ export async function scan(): Promise<void> {
         modified: entry.modified || '',
         gitBranch: entry.gitBranch || null,
         isEmpty: true,
+        emptyReason: 'No session file',
         diskSize: 0,
         dirName,
       });

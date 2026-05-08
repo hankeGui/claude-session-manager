@@ -20,6 +20,7 @@ export interface Session {
   gitBranch: string | null;
   diskSize: number;
   isEmpty: boolean;
+  emptyReason: string | null;
   projectDisplayName?: string;
   projectPath?: string;
   [key: string]: any;
