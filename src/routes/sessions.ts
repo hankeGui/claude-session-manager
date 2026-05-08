@@ -67,7 +67,7 @@ router.post('/:sessionId/auto-rename', (req: Request, res: Response) => {
   const { project } = found;
   const cwd = project.projectPath || process.env.HOME;
   const prompt = 'Based on the conversation history in this session, generate a short descriptive title (under 50 characters, in the same language as the conversation). Output ONLY the title text, nothing else.';
-  const cmd = `claude -p "${prompt.replace(/"/g, '\\"')}" --resume ${sessionId} --no-session-persistence --bare`;
+  const cmd = `claude -p "${prompt.replace(/"/g, '\\"')}" --resume ${sessionId} --no-session-persistence --bare < /dev/null`;
 
   exec(cmd, { cwd, timeout: 30000 }, (err, stdout, stderr) => {
     if (err) {
