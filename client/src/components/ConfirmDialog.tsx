@@ -7,7 +7,7 @@ interface ConfirmOptions {
   okText?: string;
   okClass?: string;
   checkbox?: { label: string; defaultChecked?: boolean };
-  onMount?: () => void;
+  onMount?: (close: () => void) => void;
 }
 
 interface ConfirmState extends ConfirmOptions {
@@ -50,7 +50,8 @@ export default function ConfirmDialog() {
 
   useEffect(() => {
     if (state?.onMount) {
-      setTimeout(() => state.onMount!(), 0);
+      const close = () => { state.resolve({ confirmed: false }); setState(null); };
+      setTimeout(() => state.onMount!(close), 0);
     }
   }, [state]);
 

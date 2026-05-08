@@ -66,7 +66,7 @@ export default function SessionCard({ session, onView }: Props) {
       html: true,
       okText: 'Save',
       okClass: 'success',
-      onMount: () => {
+      onMount: (close) => {
         const btn = document.getElementById('ai-gen-btn');
         if (btn) {
           btn.onclick = (ev) => {
@@ -78,6 +78,7 @@ export default function SessionCard({ session, onView }: Props) {
               return;
             }
             useStore.getState().startAiRename(session.sessionId, currentTitle);
+            close();
           };
         }
       },
