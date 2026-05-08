@@ -33,7 +33,16 @@ if (!noOpen) {
 }
 
 // Start the server via tsx (bundled as dependency)
-const tsxBin = path.join(__dirname, '..', 'node_modules', '.bin', 'tsx');
+const fs = require('fs');
+const possibleTsxPaths = [
+  path.join(__dirname, '..', 'node_modules', '.bin', 'tsx'),  // nested node_modules
+  path.join(__dirname, '..', '..', '.bin', 'tsx'),             // hoisted (npx/flat)
+];
+const tsxBin = possibleTsxPaths.find(p => fs.existsSync(p));
+if (!tsxBin) {
+  console.error('Error: tsx not found. Try reinstalling: npm install -g claude-session-mgr');
+  process.exit(1);
+}
 const serverPath = path.join(__dirname, '..', 'server.ts');
 
 const child = spawn(tsxBin, [serverPath], {
