@@ -5,6 +5,14 @@ export type SortField = 'modified' | 'created' | 'messageCount' | 'diskSize';
 export type SortOrder = 'asc' | 'desc';
 export type EmptyFilter = '' | 'true' | 'false';
 
+export interface AiTask {
+  sessionId: string;
+  sessionTitle: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  result?: string;
+  error?: string;
+}
+
 interface AppState {
   projects: Project[];
   currentProject: string | null;
@@ -16,6 +24,8 @@ interface AppState {
   searchQuery: string;
   stats: Stats | null;
   loading: boolean;
+  aiTask: AiTask | null;
+  aiTaskMinimized: boolean;
 
   // Actions
   loadStats: () => Promise<void>;
@@ -35,6 +45,9 @@ interface AppState {
   batchDelete: () => Promise<{ deleted: number; failed: number }>;
   setTitle: (sessionId: string, title: string) => Promise<void>;
   autoRename: (sessionId: string) => Promise<string>;
+  startAiRename: (sessionId: string, sessionTitle: string) => void;
+  dismissAiTask: () => void;
+  toggleAiTaskMinimized: () => void;
   refresh: () => Promise<void>;
 }
 
@@ -49,6 +62,8 @@ export const useStore = create<AppState>((set, get) => ({
   searchQuery: '',
   stats: null,
   loading: false,
+  aiTask: null,
+  aiTaskMinimized: false,
 
   loadStats: async () => {
     const stats = await api.getStats();
@@ -210,6 +225,31 @@ export const useStore = create<AppState>((set, get) => ({
     }));
     return title;
   },
+
+  startAiRename: (sessionId, sessionTitle) => {
+    const { aiTask } = get();
+    if (aiTask && aiTask.status === 'running') return; // one at a time
+    set({
+      aiTask: { sessionId, sessionTitle, status: 'running' },
+      aiTaskMinimized: false,
+    });
+    api.autoRename(sessionId).then(({ title }) => {
+      set((state) => ({
+        aiTask: { ...state.aiTask!, status: 'done', result: title },
+        sessions: state.sessions.map((s) =>
+          s.sessionId === sessionId ? { ...s, customTitle: title } : s
+        ),
+      }));
+    }).catch((err) => {
+      set((state) => ({
+        aiTask: { ...state.aiTask!, status: 'error', error: err.message },
+      }));
+    });
+  },
+
+  dismissAiTask: () => set({ aiTask: null }),
+
+  toggleAiTaskMinimized: () => set((state) => ({ aiTaskMinimized: !state.aiTaskMinimized })),
 
   refresh: async () => {
     await Promise.all([get().loadStats(), get().loadProjects()]);

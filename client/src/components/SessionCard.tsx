@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { api, Session } from '../api';
 import { useStore } from '../store';
 import { confirm } from './ConfirmDialog';
@@ -50,11 +49,12 @@ export default function SessionCard({ session, onView }: Props) {
 
   const handleRename = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    const currentTitle = session.customTitle || session.summary || session.firstPrompt || '';
     const { confirmed } = await confirm({
       title: 'Rename Session',
       message: `<div>
         <div style="display:flex;gap:8px;align-items:center">
-          <input id="rename-input" type="text" value="${(session.customTitle || '').replace(/"/g, '&quot;')}"
+          <input id="rename-input" type="text" value="${currentTitle.replace(/"/g, '&quot;')}"
             placeholder="Enter new title..."
             style="flex:1;padding:8px 12px;border:1px solid #2a3a5e;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:14px;" />
           <button id="ai-gen-btn" type="button"
@@ -66,6 +66,21 @@ export default function SessionCard({ session, onView }: Props) {
       html: true,
       okText: 'Save',
       okClass: 'success',
+      onMount: () => {
+        const btn = document.getElementById('ai-gen-btn');
+        if (btn) {
+          btn.onclick = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const { aiTask } = useStore.getState();
+            if (aiTask && aiTask.status === 'running') {
+              showToast('AI task already running, please wait', 'error');
+              return;
+            }
+            useStore.getState().startAiRename(session.sessionId, currentTitle);
+          };
+        }
+      },
     });
     if (!confirmed) return;
     const input = document.getElementById('rename-input') as HTMLInputElement;
@@ -77,32 +92,6 @@ export default function SessionCard({ session, onView }: Props) {
       showToast(err.message, 'error');
     }
   };
-
-  // Attach AI generate button handler after dialog renders
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const btn = (e.target as HTMLElement).closest('#ai-gen-btn');
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      btn.textContent = 'Generating...';
-      (btn as HTMLButtonElement).disabled = true;
-      api.autoRename(session.sessionId).then(({ title: newTitle }) => {
-        const input = document.getElementById('rename-input') as HTMLInputElement;
-        if (input) input.value = newTitle;
-        btn.textContent = 'AI Generate';
-        (btn as HTMLButtonElement).disabled = false;
-      }).catch(() => {
-        btn.textContent = 'Failed';
-        setTimeout(() => {
-          btn.textContent = 'AI Generate';
-          (btn as HTMLButtonElement).disabled = false;
-        }, 2000);
-      });
-    };
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, [session.sessionId]);
 
   const handleResume = async (e: React.MouseEvent) => {
     e.stopPropagation();

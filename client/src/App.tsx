@@ -6,6 +6,7 @@ import Sidebar from './components/Sidebar';
 import SessionList from './components/SessionList';
 import Toast from './components/Toast';
 import ConfirmDialog from './components/ConfirmDialog';
+import AiTaskIndicator from './components/AiTaskIndicator';
 
 export default function App() {
   const loadStats = useStore((s) => s.loadStats);
@@ -28,6 +29,7 @@ export default function App() {
       </main>
       <Toast />
       <ConfirmDialog />
+      <AiTaskIndicator />
     </div>
   );
 }
