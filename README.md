@@ -13,20 +13,23 @@ As you work with Claude Code across many projects, sessions accumulate quickly a
 - **View session messages** — read conversation history with clean formatting (system tags stripped)
 - **Resume sessions** — open a terminal and run `claude --resume <id>` with one click
 - **Delete sessions** — single or batch delete with confirmation, cleans up all related files
-- **Rename sessions** — manual or AI-powered auto-rename using Claude
-- **Empty detection** — automatically flags cleared/abandoned sessions for cleanup
+- **Rename sessions** — manual or AI-powered auto-rename with background progress indicator
+- **Empty detection** — automatically flags cleared/abandoned sessions with reason (No conversation, Exited immediately, Cleared, etc.)
+- **Auto port detection** — finds a free port automatically if default 3000 is in use
 - **Dark theme** — easy on the eyes
 
 ## Quick Start
 
 ```bash
 # Run directly (no install needed)
-npx claude-session-manager
+npx claude-session-mgr
 
 # Or install globally
-npm install -g claude-session-manager
+npm install -g claude-session-mgr
 csm
 ```
+
+Stop the server with `Ctrl+C`.
 
 ## Development
 
@@ -39,11 +42,28 @@ npm install
 npm start
 
 # Start Vite dev server with hot reload (proxies API to backend)
-# Run in one terminal: PORT=3456 npm start
-# Run in another: npm run dev
+# Terminal 1: PORT=3456 npm start
+# Terminal 2: npm run dev
 ```
 
 Open http://localhost:5173 (dev) or http://localhost:3000 (production) in your browser.
+
+## Testing
+
+```bash
+# Run all tests (backend + frontend)
+npm test
+
+# Backend tests only
+npm run test:backend
+
+# Frontend tests only
+npm run test:client
+```
+
+Tests use [Vitest](https://vitest.dev/) with:
+- Backend: supertest for API integration tests
+- Frontend: @testing-library/react for component/store tests
 
 ## How It Works
 
@@ -54,6 +74,35 @@ The app reads session data directly from `~/.claude/projects/` on your local mac
 - `file-history/` and subagent directories — cleaned up on delete
 
 No database required. All data stays local.
+
+## Project Structure
+
+```
+claude-session-mgr/
+├── bin/cli.js              # CLI entry point (auto port, browser open)
+├── server.ts               # Express server (API + static serving)
+├── src/
+│   ├── routes/             # API route handlers
+│   │   ├── projects.ts     # Project listing and session fetching
+│   │   ├── sessions.ts     # Messages, delete, rename, resume
+│   │   └── search.ts       # Local search and AI deep search
+│   ├── services/           # Business logic
+│   │   ├── scanner.ts      # Session indexing and metadata
+│   │   ├── session-reader.ts   # JSONL message parsing
+│   │   └── session-cleaner.ts  # Session deletion
+│   ├── utils/paths.ts      # Path constants and helpers
+│   └── types.ts            # Shared TypeScript interfaces
+├── client/                 # React frontend source (dev only)
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   ├── store/          # Zustand state management
+│   │   ├── api/            # API client
+│   │   └── utils/          # Content cleaning utilities
+│   └── vite.config.ts      # Builds to ../dist/
+├── dist/                   # Built frontend (served in production)
+├── tests/                  # Backend tests
+└── vitest.config.ts        # Backend test configuration
+```
 
 ## API Reference
 
@@ -73,15 +122,17 @@ No database required. All data stays local.
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript + Tailwind CSS (Vite 5)
+- **Frontend**: React 18 + TypeScript + Tailwind CSS (Vite 5)
 - **State Management**: Zustand
 - **Backend**: TypeScript + Express (runs via [tsx](https://github.com/privatenumber/tsx), no compile step)
+- **Testing**: Vitest + supertest + @testing-library/react
 - **AI features**: Claude Code CLI (`claude -p`) for auto-rename and deep search
+- **CI/CD**: GitHub Actions for automated npm publishing
 
 ## Requirements
 
 - Node.js 18+
-- Claude Code CLI installed and configured
+- Claude Code CLI installed and configured (for AI features)
 - macOS (terminal integration uses AppleScript for iTerm2/Terminal.app)
 
 ## License
