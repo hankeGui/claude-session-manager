@@ -12,9 +12,9 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 const clientDist = path.join(__dirname, 'client', 'dist');
-const publicDir = path.join(__dirname, 'public');
-const staticDir = fs.existsSync(clientDist) ? clientDist : publicDir;
-app.use(express.static(staticDir));
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+}
 
 app.use('/api/projects', projectsRouter);
 app.use('/api/sessions', sessionsRouter);
@@ -35,7 +35,12 @@ app.get('/api/stats', (_req, res) => {
 
 // SPA fallback
 app.get('*', (_req, res) => {
-  res.sendFile(path.join(staticDir, 'index.html'));
+  const indexFile = path.join(clientDist, 'index.html');
+  if (fs.existsSync(indexFile)) {
+    res.sendFile(indexFile);
+  } else {
+    res.status(404).send('Frontend not built. Run: cd client && npm install && npm run build');
+  }
 });
 
 async function start() {

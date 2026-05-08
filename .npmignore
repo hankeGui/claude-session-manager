@@ -1,0 +1,5 @@
+node_modules/
+.claude/
+.github/
+session-titles.json
+client/node_modules/
