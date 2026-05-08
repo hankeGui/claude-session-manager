@@ -1,6 +1,6 @@
 {
   "name": "claude-session-mgr",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
   "main": "server.ts",
   "bin": {
