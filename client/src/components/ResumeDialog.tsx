@@ -93,7 +93,7 @@ export default function ResumeDialog({ session, onClose }: Props) {
           <div className="text-xs text-text-muted mb-1.5">Resume command:</div>
           <div className="flex items-center gap-2">
             <input
-              ref={input1Ref}
+
               type="text"
               value={cmd1}
               onChange={(e) => setCmd1(e.target.value)}
@@ -119,7 +119,7 @@ export default function ResumeDialog({ session, onClose }: Props) {
           <div className="text-xs text-warning mb-1.5">Skip permissions (dangerously auto-approve all tool calls):</div>
           <div className="flex items-center gap-2">
             <input
-              ref={input2Ref}
+
               type="text"
               value={cmd2}
               onChange={(e) => setCmd2(e.target.value)}
