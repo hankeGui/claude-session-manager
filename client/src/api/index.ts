@@ -21,16 +21,22 @@ export interface Session {
   diskSize: number;
   isEmpty: boolean;
   emptyReason: string | null;
+  isFavorite: boolean;
   projectDisplayName?: string;
   projectPath?: string;
   [key: string]: any;
+}
+
+export interface ToolCall {
+  name: string;
+  input?: Record<string, any>;
 }
 
 export interface Message {
   type: 'user' | 'assistant';
   content: string;
   timestamp: string;
-  toolCalls?: string[];
+  toolCalls?: ToolCall[];
 }
 
 export interface Stats {
@@ -73,10 +79,12 @@ export const api = {
       project: { dirName: string; displayName: string; projectPath: string };
     }>(`/api/sessions/${sessionId}/messages?limit=${limit}`),
 
-  search: (q: string, params?: { project?: string; empty?: string }) => {
+  search: (q: string, params?: { project?: string; empty?: string; mode?: string; favorite?: string }) => {
     const qs = new URLSearchParams({ q });
     if (params?.project) qs.set('project', params.project);
     if (params?.empty) qs.set('empty', params.empty);
+    if (params?.mode) qs.set('mode', params.mode);
+    if (params?.favorite) qs.set('favorite', params.favorite);
     return request<{ results: Session[]; total: number }>(`/api/search?${qs}`);
   },
 
@@ -106,15 +114,32 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
 
+  setFavorite: (sessionId: string, isFavorite: boolean) =>
+    request<{ success: boolean; isFavorite: boolean }>(`/api/sessions/${sessionId}/favorite`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isFavorite }),
+    }),
+
   autoRename: (sessionId: string) =>
     request<{ success: boolean; title: string }>(`/api/sessions/${sessionId}/auto-rename`, {
       method: 'POST',
     }),
 
-  resume: (sessionId: string, skipPermissions = false) =>
+  resume: (sessionId: string, skipPermissions = false, terminal?: string) =>
     request<{ success: boolean; terminal: string; cwd: string }>(`/api/sessions/${sessionId}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skipPermissions }),
+      body: JSON.stringify({ skipPermissions, terminal }),
+    }),
+
+  getPreferences: () =>
+    request<{ terminal: string | null; tmuxAvailable: boolean }>('/api/sessions/preferences'),
+
+  setPreferences: (prefs: { terminal: string }) =>
+    request<{ success: boolean }>('/api/sessions/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
     }),
 };

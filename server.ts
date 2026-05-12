@@ -4,7 +4,9 @@ import fs from 'fs';
 import projectsRouter from './src/routes/projects';
 import sessionsRouter from './src/routes/sessions';
 import searchRouter from './src/routes/search';
+import schedulerRouter from './src/routes/scheduler';
 import * as scanner from './src/services/scanner';
+import * as scheduler from './src/services/scheduler';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,6 +21,7 @@ if (fs.existsSync(staticDir)) {
 app.use('/api/projects', projectsRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/search', searchRouter);
+app.use('/api/scheduler', schedulerRouter);
 
 app.get('/api/stats', (_req, res) => {
   const data = scanner.getData();
@@ -48,6 +51,9 @@ async function start() {
   await scanner.scan();
   const data = scanner.getData();
   console.log(`Found ${data.projects.length} projects with ${data.projects.reduce((sum, p) => sum + p.sessions.length, 0)} sessions`);
+
+  scheduler.init();
+  console.log('Scheduler initialized');
 
   app.listen(PORT, () => {
     console.log(`Claude Session Manager running at http://localhost:${PORT}`);

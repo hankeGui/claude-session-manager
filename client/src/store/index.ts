@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { api, Project, Session, Stats } from '../api';
 
+export type AppView = 'sessions' | 'scheduler';
 export type SortField = 'modified' | 'created' | 'messageCount' | 'diskSize';
 export type SortOrder = 'asc' | 'desc';
 export type EmptyFilter = '' | 'true' | 'false';
+export type SearchMode = 'default' | 'regex';
 
 export interface AiTask {
   sessionId: string;
@@ -14,6 +16,7 @@ export interface AiTask {
 }
 
 interface AppState {
+  currentView: AppView;
   projects: Project[];
   currentProject: string | null;
   sessions: Session[];
@@ -21,6 +24,7 @@ interface AppState {
   sortField: SortField;
   sortOrder: SortOrder;
   emptyFilter: EmptyFilter;
+  searchMode: SearchMode;
   searchQuery: string;
   stats: Stats | null;
   loading: boolean;
@@ -28,6 +32,7 @@ interface AppState {
   aiTaskMinimized: boolean;
 
   // Actions
+  setView: (view: AppView) => void;
   loadStats: () => Promise<void>;
   loadProjects: () => Promise<void>;
   loadSessions: (dirName?: string | null) => Promise<void>;
@@ -35,6 +40,7 @@ interface AppState {
   setSortField: (field: SortField) => void;
   setSortOrder: (order: SortOrder) => void;
   setEmptyFilter: (filter: EmptyFilter) => void;
+  setSearchMode: (mode: SearchMode) => void;
   setSearchQuery: (query: string) => void;
   doSearch: (query: string) => Promise<void>;
   doDeepSearch: (query: string) => Promise<Session[]>;
@@ -45,6 +51,7 @@ interface AppState {
   batchDelete: () => Promise<{ deleted: number; failed: number }>;
   setTitle: (sessionId: string, title: string) => Promise<void>;
   autoRename: (sessionId: string) => Promise<string>;
+  setFavorite: (sessionId: string, isFavorite: boolean) => Promise<void>;
   startAiRename: (sessionId: string, sessionTitle: string) => void;
   dismissAiTask: () => void;
   toggleAiTaskMinimized: () => void;
@@ -52,6 +59,7 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  currentView: 'sessions',
   projects: [],
   currentProject: null,
   sessions: [],
@@ -59,11 +67,14 @@ export const useStore = create<AppState>((set, get) => ({
   sortField: 'modified',
   sortOrder: 'desc',
   emptyFilter: '',
+  searchMode: 'default' as SearchMode,
   searchQuery: '',
   stats: null,
-  loading: false,
+  loading: true,
   aiTask: null,
   aiTaskMinimized: false,
+
+  setView: (view) => set({ currentView: view }),
 
   loadStats: async () => {
     const stats = await api.getStats();
@@ -80,7 +91,12 @@ export const useStore = create<AppState>((set, get) => ({
     const project = dirName ?? get().currentProject;
     set({ loading: true });
     try {
-      if (project) {
+      if (project === '__favorites__') {
+        // Favorites view - fetch only favorited sessions
+        const { results } = await api.search('', { empty: emptyFilter || undefined, favorite: 'true' });
+        const sorted = sortSessions(results, sortField, sortOrder);
+        set({ sessions: sorted, selected: new Set() });
+      } else if (project) {
         const { sessions, projectPath } = await api.getSessions(project, {
           sort: sortField,
           order: sortOrder,
@@ -135,6 +151,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  setSearchMode: (mode) => set({ searchMode: mode }),
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   doSearch: async (query) => {
@@ -144,13 +161,15 @@ export const useStore = create<AppState>((set, get) => ({
     }
     set({ loading: true });
     try {
-      const { emptyFilter, currentProject, sortField, sortOrder } = get();
+      const { emptyFilter, currentProject, sortField, sortOrder, searchMode } = get();
       const { results } = await api.search(query, {
-        project: currentProject || undefined,
+        project: currentProject && currentProject !== '__favorites__' ? currentProject : undefined,
         empty: emptyFilter || undefined,
+        mode: searchMode !== 'default' ? searchMode : undefined,
+        favorite: currentProject === '__favorites__' ? 'true' : undefined,
       });
-      // Client-side sort
-      const sorted = sortSessions(results, sortField, sortOrder);
+      // Client-side sort (skip if search already scored results)
+      const sorted = query.trim() ? results : sortSessions(results, sortField, sortOrder);
       set({ sessions: sorted, selected: new Set() });
     } finally {
       set({ loading: false });
@@ -216,6 +235,15 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
 
+  setFavorite: async (sessionId, isFavorite) => {
+    await api.setFavorite(sessionId, isFavorite);
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.sessionId === sessionId ? { ...s, isFavorite } : s
+      ),
+    }));
+  },
+
   autoRename: async (sessionId) => {
     const { title } = await api.autoRename(sessionId);
     set((state) => ({
@@ -264,6 +292,10 @@ export const useStore = create<AppState>((set, get) => ({
 
 function sortSessions(sessions: Session[], field: SortField, order: SortOrder): Session[] {
   return [...sessions].sort((a, b) => {
+    // Favorites always first
+    if (a.isFavorite && !b.isFavorite) return -1;
+    if (!a.isFavorite && b.isFavorite) return 1;
+
     let cmp = 0;
     if (field === 'modified' || field === 'created') {
       cmp = (a[field] || '').localeCompare(b[field] || '');

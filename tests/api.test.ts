@@ -134,6 +134,32 @@ describe('API endpoints', () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('results');
     });
+
+    it('filters by favorite=true', async () => {
+      const res = await request(app).get('/api/search?q=&favorite=true');
+      expect(res.status).toBe(200);
+      for (const s of res.body.results) {
+        expect(s.isFavorite).toBe(true);
+      }
+    });
+
+    it('supports regex mode', async () => {
+      const res = await request(app).get('/api/search?q=test&mode=regex');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('results');
+    });
+
+    it('filters by project', async () => {
+      const data = scanner.getData();
+      if (data.projects.length > 0) {
+        const dirName = data.projects[0].dirName;
+        const res = await request(app).get(`/api/search?q=&project=${encodeURIComponent(dirName)}`);
+        expect(res.status).toBe(200);
+        for (const s of res.body.results) {
+          expect(s.projectDisplayName).toBe(data.projects[0].displayName);
+        }
+      }
+    });
   });
 
   describe('PUT /api/sessions/:sessionId/title', () => {
@@ -204,6 +230,65 @@ describe('API endpoints', () => {
       if (res.body.results.length > 0) {
         const s = res.body.results[0];
         expect(s.emptyReason).toBeNull();
+      }
+    });
+  });
+
+  describe('PUT /api/sessions/:sessionId/favorite', () => {
+    it('returns 404 for unknown session', async () => {
+      const res = await request(app)
+        .put('/api/sessions/nonexistent-id/favorite')
+        .send({ isFavorite: true });
+      expect(res.status).toBe(404);
+    });
+
+    it('sets favorite for valid session', async () => {
+      const data = scanner.getData();
+      const session = data.projects.flatMap(p => p.sessions).find(s => !s.isEmpty);
+      if (session) {
+        const res = await request(app)
+          .put(`/api/sessions/${session.sessionId}/favorite`)
+          .send({ isFavorite: true });
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.isFavorite).toBe(true);
+
+        // Verify it shows up in favorites filter
+        const searchRes = await request(app).get('/api/search?q=&favorite=true');
+        const found = searchRes.body.results.some((s: any) => s.sessionId === session.sessionId);
+        expect(found).toBe(true);
+
+        // Clean up
+        await request(app)
+          .put(`/api/sessions/${session.sessionId}/favorite`)
+          .send({ isFavorite: false });
+      }
+    });
+
+    it('removes favorite', async () => {
+      const data = scanner.getData();
+      const session = data.projects.flatMap(p => p.sessions).find(s => !s.isEmpty);
+      if (session) {
+        // Set then unset
+        await request(app)
+          .put(`/api/sessions/${session.sessionId}/favorite`)
+          .send({ isFavorite: true });
+        const res = await request(app)
+          .put(`/api/sessions/${session.sessionId}/favorite`)
+          .send({ isFavorite: false });
+        expect(res.status).toBe(200);
+        expect(res.body.isFavorite).toBe(false);
+      }
+    });
+  });
+
+  describe('Session fields include isFavorite', () => {
+    it('sessions have isFavorite field', async () => {
+      const res = await request(app).get('/api/search?q=&empty=false');
+      if (res.body.results.length > 0) {
+        const s = res.body.results[0];
+        expect(s).toHaveProperty('isFavorite');
+        expect(typeof s.isFavorite).toBe('boolean');
       }
     });
   });

@@ -1,7 +1,9 @@
-import { api, Session } from '../api';
+import { useState } from 'react';
+import { Session } from '../api';
 import { useStore } from '../store';
 import { confirm } from './ConfirmDialog';
 import { showToast } from './Toast';
+import ResumeDialog from './ResumeDialog';
 
 interface Props {
   session: Session;
@@ -26,6 +28,8 @@ export default function SessionCard({ session, onView }: Props) {
   const toggleSelect = useStore((s) => s.toggleSelect);
   const deleteSession = useStore((s) => s.deleteSession);
   const setTitle = useStore((s) => s.setTitle);
+  const setFavorite = useStore((s) => s.setFavorite);
+  const [showResume, setShowResume] = useState(false);
 
   const isSelected = selected.has(session.sessionId);
   const title = session.customTitle || session.summary || session.firstPrompt || session.sessionId.slice(0, 8);
@@ -94,31 +98,9 @@ export default function SessionCard({ session, onView }: Props) {
     }
   };
 
-  const handleResume = async (e: React.MouseEvent) => {
+  const handleResume = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const projects = useStore.getState().projects;
-    const project = projects.find((p) => p.dirName === session.dirName);
-    const cwd = project?.projectPath || session.projectPath || '~';
-    const flags = '';
-    const cmdPreview = `cd ${cwd} && claude${flags} --resume ${session.sessionId}`;
-    const { confirmed, checked } = await confirm({
-      title: 'Resume Session',
-      message: `<div style="color:#4fc3f7;font-size:13px;margin-bottom:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</div>
-        <div style="background:#1a1a2e;border:1px solid #2a3a5e;border-radius:4px;padding:8px 12px;font-size:12px;overflow-x:auto;white-space:nowrap">
-          <code style="color:#66bb6a;font-family:monospace">${cmdPreview}</code>
-        </div>`,
-      html: true,
-      okText: 'Resume',
-      okClass: 'success',
-      checkbox: { label: 'Add --dangerously-skip-permissions' },
-    });
-    if (!confirmed) return;
-    try {
-      await api.resume(session.sessionId, checked);
-      showToast('Session resumed in terminal', 'success');
-    } catch (err: any) {
-      showToast(err.message, 'error');
-    }
+    setShowResume(true);
   };
 
   return (
@@ -135,6 +117,13 @@ export default function SessionCard({ session, onView }: Props) {
         onClick={(e) => e.stopPropagation()}
         className="mt-1 cursor-pointer"
       />
+      <button
+        onClick={(e) => { e.stopPropagation(); setFavorite(session.sessionId, !session.isFavorite); }}
+        className={`mt-0.5 text-base leading-none transition-colors ${session.isFavorite ? 'text-yellow-400' : 'text-text-muted/30 hover:text-yellow-400/60'}`}
+        title={session.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      >
+        {session.isFavorite ? '\u2605' : '\u2606'}
+      </button>
       <div className="flex-1 min-w-0">
         <div className={`text-sm font-medium truncate mb-1 ${session.customTitle ? 'text-accent font-semibold' : ''}`}>
           {title}
@@ -184,6 +173,9 @@ export default function SessionCard({ session, onView }: Props) {
           Del
         </button>
       </div>
+      {showResume && (
+        <ResumeDialog session={session} onClose={() => setShowResume(false)} />
+      )}
     </div>
   );
 }

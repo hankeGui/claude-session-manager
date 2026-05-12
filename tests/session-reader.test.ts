@@ -1,111 +1,203 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+
+const TMP_DIR = path.join(os.tmpdir(), 'csm-test-reader-' + Date.now());
+
+// Mock the paths module so readSessionMessages uses our temp directory
+vi.mock('../src/utils/paths', () => ({
+  sessionJsonlPath: (dirName: string, sessionId: string) =>
+    path.join(TMP_DIR, dirName, `${sessionId}.jsonl`),
+}));
+
 import { readSessionMessages } from '../src/services/session-reader';
 
-const TMP_DIR = path.join(os.tmpdir(), 'csm-test-reader');
 const FAKE_PROJECT = 'test-project';
 const FAKE_SESSION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
+function writeJsonl(sessionId: string, entries: any[]) {
+  const dir = path.join(TMP_DIR, FAKE_PROJECT);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), entries.map(e => JSON.stringify(e)).join('\n'));
+}
+
 describe('session-reader', () => {
   beforeAll(() => {
-    const projectDir = path.join(os.homedir(), '.claude', 'projects', FAKE_PROJECT);
-    // We'll create a temp dir and symlink or just test with actual paths
-    // Instead, let's create real test fixtures in tmp
-    const dir = path.join(TMP_DIR, FAKE_PROJECT);
-    fs.mkdirSync(dir, { recursive: true });
-
-    const lines = [
-      JSON.stringify({ type: 'user', message: { content: 'Hello' }, timestamp: '2026-01-01T00:00:00Z' }),
-      JSON.stringify({ type: 'assistant', message: { content: 'Hi there! How can I help?' }, timestamp: '2026-01-01T00:00:01Z' }),
-      JSON.stringify({ type: 'user', message: { content: 'Fix my code' }, timestamp: '2026-01-01T00:00:02Z' }),
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Sure, let me look.' }, { type: 'tool_use', name: 'Read' }] }, timestamp: '2026-01-01T00:00:03Z' }),
-      JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'Thanks' }] }, timestamp: '2026-01-01T00:00:04Z' }),
-      JSON.stringify({ type: 'assistant', message: { content: 'Done!' }, timestamp: '2026-01-01T00:00:05Z' }),
-    ];
-
-    fs.writeFileSync(path.join(dir, `${FAKE_SESSION}.jsonl`), lines.join('\n'));
+    fs.mkdirSync(path.join(TMP_DIR, FAKE_PROJECT), { recursive: true });
   });
 
   afterAll(() => {
     fs.rmSync(TMP_DIR, { recursive: true, force: true });
   });
 
-  it('reads all messages with default limit', async () => {
-    // We need to mock the path resolution — instead test the logic by importing with mocked paths
-    // For now, test with inline JSONL parsing logic
-    const filePath = path.join(TMP_DIR, FAKE_PROJECT, `${FAKE_SESSION}.jsonl`);
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').filter(l => l.trim());
+  it('reads basic user/assistant conversation', async () => {
+    writeJsonl(FAKE_SESSION, [
+      { type: 'user', message: { content: 'Hello' }, timestamp: '2026-01-01T00:00:00Z' },
+      { type: 'assistant', message: { content: 'Hi there!' }, timestamp: '2026-01-01T00:00:01Z' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, FAKE_SESSION);
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[0]).toEqual({ type: 'user', content: 'Hello', timestamp: '2026-01-01T00:00:00Z' });
+    expect(result.messages[1]).toEqual({ type: 'assistant', content: 'Hi there!', timestamp: '2026-01-01T00:00:01Z' });
+  });
 
-    const messages = [];
-    for (const line of lines) {
-      const obj = JSON.parse(line);
-      if (obj.type === 'user' || obj.type === 'assistant') {
-        messages.push(obj);
-      }
+  it('merges consecutive assistant messages into one turn', async () => {
+    const sid = 'merge-test-1';
+    writeJsonl(sid, [
+      { type: 'user', message: { content: 'Do something' }, timestamp: 't0' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Let me help.' }] }, timestamp: 't1' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read' }] }, timestamp: 't2' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit' }] }, timestamp: 't3' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Done!' }] }, timestamp: 't4' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(2); // 1 user + 1 merged assistant
+    expect(result.messages[1].type).toBe('assistant');
+    expect(result.messages[1].content).toBe('Let me help.\nDone!');
+    expect(result.messages[1].toolCalls!.map(t => t.name)).toEqual(['Read', 'Edit']);
+  });
+
+  it('shows tool-only assistant turns with tool names', async () => {
+    const sid = 'tool-only-1';
+    writeJsonl(sid, [
+      { type: 'user', message: { content: 'Fix it' }, timestamp: 't0' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read' }] }, timestamp: 't1' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit' }] }, timestamp: 't2' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] }, timestamp: 't3' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(2); // user + assistant turn
+    const assistant = result.messages[1];
+    expect(assistant.content).toBe('');
+    expect(assistant.toolCalls!.map(t => t.name)).toEqual(['Read', 'Edit', 'Bash']);
+  });
+
+  it('skips non-user/assistant types', async () => {
+    const sid = 'skip-types-1';
+    writeJsonl(sid, [
+      { type: 'file-history-snapshot', data: {} },
+      { type: 'user', message: { content: 'Hi' }, timestamp: 't0' },
+      { type: 'system', message: { content: 'system msg' } },
+      { type: 'attachment', data: {} },
+      { type: 'assistant', message: { content: 'Hello' }, timestamp: 't1' },
+      { type: 'permission-mode', data: {} },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(2);
+  });
+
+  it('handles array content in user messages', async () => {
+    const sid = 'user-array-1';
+    writeJsonl(sid, [
+      { type: 'user', message: { content: [{ type: 'text', text: 'Hello from array' }] }, timestamp: 't0' },
+      { type: 'assistant', message: { content: 'Response' }, timestamp: 't1' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages[0].content).toBe('Hello from array');
+  });
+
+  it('truncates long assistant content', async () => {
+    const sid = 'truncate-1';
+    const longText = 'x'.repeat(5000);
+    writeJsonl(sid, [
+      { type: 'user', message: { content: 'Hi' }, timestamp: 't0' },
+      { type: 'assistant', message: { content: longText }, timestamp: 't1' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages[1].content.length).toBeLessThan(5000);
+    expect(result.messages[1].content).toContain('(truncated)');
+  });
+
+  it('handles empty file gracefully', async () => {
+    const sid = 'empty-file-1';
+    writeJsonl(sid, []);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(0);
+    expect(result.total).toBe(0);
+  });
+
+  it('skips invalid JSON lines', async () => {
+    const sid = 'invalid-json-1';
+    const dir = path.join(TMP_DIR, FAKE_PROJECT);
+    fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+      'invalid json',
+      JSON.stringify({ type: 'user', message: { content: 'valid' }, timestamp: 't0' }),
+      'also invalid',
+      JSON.stringify({ type: 'assistant', message: { content: 'reply' }, timestamp: 't1' }),
+    ].join('\n'));
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(2);
+  });
+
+  it('respects offset and limit', async () => {
+    const sid = 'pagination-1';
+    const entries = [];
+    for (let i = 0; i < 10; i++) {
+      entries.push({ type: 'user', message: { content: `msg ${i}` }, timestamp: `t${i * 2}` });
+      entries.push({ type: 'assistant', message: { content: `reply ${i}` }, timestamp: `t${i * 2 + 1}` });
     }
-
-    expect(messages).toHaveLength(6);
-    expect(messages[0].type).toBe('user');
-    expect(messages[1].type).toBe('assistant');
+    writeJsonl(sid, entries);
+    // 20 turns total (user/assistant alternate, no consecutive assistant merging)
+    // offset=2 skips first 2 (msg 0, reply 0), limit=3 returns next 3
+    const result = await readSessionMessages(FAKE_PROJECT, sid, { limit: 3, offset: 2 });
+    expect(result.messages).toHaveLength(3);
+    expect(result.messages[0].content).toBe('msg 1');
+    expect(result.messages[1].content).toBe('reply 1');
+    expect(result.messages[2].content).toBe('msg 2');
+    expect(result.total).toBe(20);
   });
 
-  it('parses string content correctly', () => {
-    const obj = { type: 'user', message: { content: 'Hello world' } };
-    const content = typeof obj.message.content === 'string' ? obj.message.content : '';
-    expect(content).toBe('Hello world');
+  it('returns file not found as empty', async () => {
+    const result = await readSessionMessages(FAKE_PROJECT, 'nonexistent-id');
+    expect(result.messages).toHaveLength(0);
+    expect(result.total).toBe(0);
   });
 
-  it('parses array content with text blocks', () => {
-    const obj = { type: 'assistant', message: { content: [{ type: 'text', text: 'Part 1' }, { type: 'text', text: 'Part 2' }] } };
-    const parts = obj.message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text);
-    expect(parts.join('\n')).toBe('Part 1\nPart 2');
+  it('skips tool_result user messages without breaking assistant merge', async () => {
+    const sid = 'tool-result-1';
+    writeJsonl(sid, [
+      { type: 'user', message: { content: 'Do it' }, timestamp: 't0' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read' }] }, timestamp: 't1' },
+      // tool_result from system (appears as user type in JSONL)
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: 'file contents...' }] }, timestamp: 't2' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit' }] }, timestamp: 't3' },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'y', content: 'ok' }] }, timestamp: 't4' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'All done!' }] }, timestamp: 't5' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    // Should be: 1 user + 1 merged assistant (tool_results don't split the turn)
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[1].content).toBe('All done!');
+    expect(result.messages[1].toolCalls!.map(t => t.name)).toEqual(['Read', 'Edit']);
   });
 
-  it('extracts tool_use names', () => {
-    const obj = { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }, { type: 'tool_use', name: 'Edit' }, { type: 'tool_use', name: 'Bash' }] } };
-    const toolCalls = obj.message.content.filter((b: any) => b.type === 'tool_use').map((b: any) => b.name);
-    expect(toolCalls).toEqual(['Edit', 'Bash']);
+  it('ignores thinking blocks in assistant messages', async () => {
+    const sid = 'thinking-1';
+    writeJsonl(sid, [
+      { type: 'user', message: { content: 'Think about it' }, timestamp: 't0' },
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hmm...' }] }, timestamp: 't1' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Here is my answer' }] }, timestamp: 't2' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[1].content).toBe('Here is my answer');
+    expect(result.messages[1].toolCalls).toBeUndefined();
   });
 
-  it('truncates long assistant messages', () => {
-    const longContent = 'x'.repeat(5000);
-    const truncated = longContent.length > 3000 ? longContent.slice(0, 3000) + '\n... (truncated)' : longContent;
-    expect(truncated.length).toBeLessThan(5000);
-    expect(truncated).toContain('(truncated)');
-  });
-
-  it('handles empty file gracefully', () => {
-    const emptyFilePath = path.join(TMP_DIR, FAKE_PROJECT, 'empty.jsonl');
-    fs.writeFileSync(emptyFilePath, '');
-    const content = fs.readFileSync(emptyFilePath, 'utf-8');
-    const lines = content.split('\n').filter(l => l.trim());
-    expect(lines).toHaveLength(0);
-  });
-
-  it('skips invalid JSON lines', () => {
-    const lines = ['invalid json', '{"type":"user","message":{"content":"valid"}}', 'also invalid'];
-    const parsed = [];
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type === 'user' || obj.type === 'assistant') parsed.push(obj);
-      } catch {}
-    }
-    expect(parsed).toHaveLength(1);
-  });
-
-  it('respects offset and limit', () => {
-    const allMessages = Array.from({ length: 20 }, (_, i) => ({
-      type: i % 2 === 0 ? 'user' : 'assistant',
-      content: `msg ${i}`,
-    }));
-    const offset = 5;
-    const limit = 3;
-    const result = allMessages.slice(offset, offset + limit);
-    expect(result).toHaveLength(3);
-    expect(result[0].content).toBe('msg 5');
+  it('splits turns on user message boundaries', async () => {
+    const sid = 'turn-split-1';
+    writeJsonl(sid, [
+      { type: 'user', message: { content: 'Q1' }, timestamp: 't0' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read' }] }, timestamp: 't1' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Answer 1' }] }, timestamp: 't2' },
+      { type: 'user', message: { content: 'Q2' }, timestamp: 't3' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Answer 2' }] }, timestamp: 't4' },
+    ]);
+    const result = await readSessionMessages(FAKE_PROJECT, sid);
+    expect(result.messages).toHaveLength(4); // user, assistant(merged), user, assistant
+    expect(result.messages[1].content).toBe('Answer 1');
+    expect(result.messages[1].toolCalls!.map(t => t.name)).toEqual(['Read']);
+    expect(result.messages[3].content).toBe('Answer 2');
   });
 });

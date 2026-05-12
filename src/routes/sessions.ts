@@ -1,8 +1,22 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import * as scanner from '../services/scanner';
 import { readSessionMessages } from '../services/session-reader';
 import { deleteSession, batchDelete } from '../services/session-cleaner';
+import { hasTmux } from '../services/tmux';
+
+const PREFS_FILE = path.join(__dirname, '..', '..', 'user-preferences.json');
+
+function loadPrefs(): Record<string, any> {
+  try { return JSON.parse(fs.readFileSync(PREFS_FILE, 'utf-8')); }
+  catch { return {}; }
+}
+
+function savePrefs(prefs: Record<string, any>): void {
+  fs.writeFileSync(PREFS_FILE, JSON.stringify(prefs, null, 2));
+}
 
 const router = Router();
 
@@ -95,6 +109,19 @@ router.put('/:sessionId/title', (req: Request, res: Response) => {
   res.json({ success: true, sessionId, title: title || '' });
 });
 
+router.put('/:sessionId/favorite', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const { isFavorite } = req.body;
+
+  const found = scanner.getSessionById(sessionId);
+  if (!found) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  scanner.setFavorite(sessionId, !!isFavorite);
+  res.json({ success: true, sessionId, isFavorite: !!isFavorite });
+});
+
 router.post('/:sessionId/resume', (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const found = scanner.getSessionById(sessionId);
@@ -103,20 +130,46 @@ router.post('/:sessionId/resume', (req: Request, res: Response) => {
   }
 
   const { project } = found;
-  const { skipPermissions } = req.body || {};
+  const { skipPermissions, terminal: terminalChoice } = req.body || {};
   const cwd = project.projectPath || process.env.HOME;
   const flags = skipPermissions ? ' --dangerously-skip-permissions' : '';
-  const cmd = `cd ${(cwd as string).replace(/"/g, '\\"')} && claude${flags} --resume ${sessionId}`;
-  const terminal = process.env.TERM_PROGRAM || 'Apple_Terminal';
+  const claudeCmd = `cd ${(cwd as string).replace(/"/g, '\\"')} && claude${flags} --resume ${sessionId}`;
+
+  // Determine terminal to use
+  const terminal = terminalChoice || loadPrefs().terminal || 'auto';
+
+  // tmux mode
+  if (terminal === 'tmux') {
+    if (!hasTmux()) {
+      return res.status(400).json({ error: 'tmux is not installed' });
+    }
+    const name = `resume-${sessionId.slice(0, 8)}`;
+    try {
+      execSync(`tmux has-session -t ${name}`, { stdio: 'ignore' });
+      // Session exists, attach via osascript
+      openTerminalWithCmd(`tmux attach -t ${name}`);
+    } catch {
+      // Create new tmux session
+      execSync(`tmux new-session -d -s ${name} -c '${(cwd as string).replace(/'/g, "'\\''")}'`, { stdio: 'ignore' });
+      execSync(`tmux send-keys -t ${name} '${claudeCmd.replace(/'/g, "'\\''")}' Enter`, { stdio: 'ignore' });
+      openTerminalWithCmd(`tmux attach -t ${name}`);
+    }
+    return res.json({ success: true, terminal: 'tmux', cwd, sessionId });
+  }
+
+  // osascript mode (iTerm / Terminal.app)
+  const termApp = terminal === 'auto'
+    ? (process.env.TERM_PROGRAM || 'Apple_Terminal')
+    : terminal;
 
   let script: string;
-  if (terminal.includes('iTerm')) {
+  if (termApp.includes('iTerm')) {
     script = `
       tell application "iTerm2"
         activate
         set newWindow to (create window with default profile)
         tell current session of newWindow
-          write text "${cmd}"
+          write text "${claudeCmd}"
         end tell
       end tell
     `;
@@ -124,7 +177,7 @@ router.post('/:sessionId/resume', (req: Request, res: Response) => {
     script = `
       tell application "Terminal"
         activate
-        do script "${cmd}"
+        do script "${claudeCmd}"
       end tell
     `;
   }
@@ -133,8 +186,46 @@ router.post('/:sessionId/resume', (req: Request, res: Response) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to open terminal', detail: err.message });
     }
-    res.json({ success: true, terminal, cwd, sessionId });
+    res.json({ success: true, terminal: termApp, cwd, sessionId });
   });
+});
+
+function openTerminalWithCmd(cmd: string): void {
+  const terminal = process.env.TERM_PROGRAM || 'Apple_Terminal';
+  let script: string;
+  if (terminal.includes('iTerm')) {
+    script = `
+      tell application "iTerm2"
+        activate
+        set newWindow to (create window with default profile)
+        tell current session of newWindow
+          write text "${cmd.replace(/"/g, '\\"')}"
+        end tell
+      end tell
+    `;
+  } else {
+    script = `
+      tell application "Terminal"
+        activate
+        do script "${cmd.replace(/"/g, '\\"')}"
+      end tell
+    `;
+  }
+  exec(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+}
+
+// User preferences
+router.get('/preferences', (_req: Request, res: Response) => {
+  const prefs = loadPrefs();
+  res.json({ terminal: prefs.terminal || null, tmuxAvailable: hasTmux() });
+});
+
+router.put('/preferences', (req: Request, res: Response) => {
+  const { terminal } = req.body;
+  const prefs = loadPrefs();
+  prefs.terminal = terminal;
+  savePrefs(prefs);
+  res.json({ success: true, terminal });
 });
 
 export default router;

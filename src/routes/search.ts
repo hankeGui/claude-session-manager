@@ -7,12 +7,60 @@ import type { Session } from '../types';
 
 const router = Router();
 
+// Fuzzy match: all query chars must appear in order in the target
+function fuzzyMatch(query: string, target: string): number {
+  const q = query.toLowerCase();
+  const t = target.toLowerCase();
+  let qi = 0;
+  let score = 0;
+  let lastIdx = -1;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      score += (ti === lastIdx + 1) ? 2 : 1; // consecutive bonus
+      lastIdx = ti;
+      qi++;
+    }
+  }
+  return qi === q.length ? score : 0;
+}
+
+function matchSession(session: Session, q: string, mode: string): number {
+  const fields = [
+    session.customTitle || '',
+    session.summary || '',
+    session.firstPrompt || '',
+    session.gitBranch || '',
+    session.sessionId,
+  ];
+
+  if (mode === 'regex') {
+    try {
+      const re = new RegExp(q, 'i');
+      return fields.some(f => re.test(f)) ? 1 : 0;
+    } catch {
+      return 0; // invalid regex
+    }
+  }
+
+  // Default: case-insensitive includes, fallback to fuzzy
+  const query = q.toLowerCase();
+  if (fields.some(f => f.toLowerCase().includes(query))) return 100;
+
+  // Fuzzy fallback
+  let bestScore = 0;
+  for (const f of fields) {
+    const s = fuzzyMatch(q, f);
+    if (s > bestScore) bestScore = s;
+  }
+  return bestScore;
+}
+
 router.get('/', (req: Request, res: Response) => {
-  const { q, project, branch, empty } = req.query as {
-    q?: string; project?: string; branch?: string; empty?: string;
+  const { q, project, branch, empty, mode, favorite } = req.query as {
+    q?: string; project?: string; branch?: string; empty?: string; mode?: string; favorite?: string;
   };
   const data = scanner.getData();
-  const results: (Session & { projectDisplayName: string; projectPath: string })[] = [];
+  const scored: { session: Session & { projectDisplayName: string; projectPath: string }; score: number }[] = [];
 
   for (const p of data.projects) {
     if (project && p.dirName !== project) continue;
@@ -21,26 +69,31 @@ router.get('/', (req: Request, res: Response) => {
       if (branch && session.gitBranch !== branch) continue;
       if (empty === 'true' && !session.isEmpty) continue;
       if (empty === 'false' && session.isEmpty) continue;
+      if (favorite === 'true' && !session.isFavorite) continue;
 
       if (q) {
-        const query = q.toLowerCase();
-        const matchInTitle = (session.customTitle || '').toLowerCase().includes(query);
-        const matchInSummary = (session.summary || '').toLowerCase().includes(query);
-        const matchInPrompt = (session.firstPrompt || '').toLowerCase().includes(query);
-        const matchInBranch = (session.gitBranch || '').toLowerCase().includes(query);
-
-        if (!matchInTitle && !matchInSummary && !matchInPrompt && !matchInBranch) continue;
+        const score = matchSession(session, q, mode || 'default');
+        if (score <= 0) continue;
+        scored.push({
+          session: { ...session, projectDisplayName: p.displayName, projectPath: p.projectPath },
+          score,
+        });
+      } else {
+        scored.push({
+          session: { ...session, projectDisplayName: p.displayName, projectPath: p.projectPath },
+          score: 0,
+        });
       }
-
-      results.push({
-        ...session,
-        projectDisplayName: p.displayName,
-        projectPath: p.projectPath,
-      });
     }
   }
 
-  results.sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
+  // Sort: exact matches first (score 100), then by score desc, then by modified desc
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    return (b.session.modified || '').localeCompare(a.session.modified || '');
+  });
+
+  const results = scored.map(s => s.session);
   res.json({ results, total: results.length });
 });
 

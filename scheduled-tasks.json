@@ -1,0 +1,118 @@
+[
+  {
+    "id": "6245d2b6-6006-4f38-8cd1-28b36eda9b21",
+    "prompt": "test cron",
+    "scheduleType": "cron",
+    "scheduledAt": null,
+    "cron": "* * * * *",
+    "createdAt": "2026-05-08T09:35:03.943Z",
+    "startedAt": "2026-05-08T09:36:00.682Z",
+    "completedAt": "2026-05-08T09:36:25.851Z",
+    "status": "cancelled",
+    "skipPermissions": true,
+    "openInTerminal": true,
+    "workingDirectory": null,
+    "model": null,
+    "output": "Opened in iTerm.app",
+    "error": null,
+    "lastRunAt": "2026-05-08T09:36:00.682Z",
+    "runCount": 1,
+    "runHistory": [
+      "2026-05-08T09:36:00.682Z"
+    ]
+  },
+  {
+    "id": "9756b099-b89a-43f7-85e1-963078b6e969",
+    "prompt": "echo hello from tmux",
+    "scheduleType": "immediate",
+    "scheduledAt": null,
+    "cron": null,
+    "createdAt": "2026-05-08T09:45:55.393Z",
+    "startedAt": "2026-05-08T09:45:55.395Z",
+    "completedAt": "2026-05-08T09:52:03.896Z",
+    "status": "failed",
+    "skipPermissions": true,
+    "openInTerminal": true,
+    "workingDirectory": null,
+    "model": null,
+    "output": null,
+    "error": "Server restarted during execution",
+    "lastRunAt": "2026-05-08T09:45:55.395Z",
+    "runCount": 1,
+    "runHistory": [
+      "2026-05-08T09:45:55.395Z"
+    ],
+    "tmuxSession": "task-9756b099"
+  },
+  {
+    "id": "026998c0-3827-4e69-8ff8-3b04fd8b7e47",
+    "prompt": "list 3 random numbers",
+    "scheduleType": "cron",
+    "scheduledAt": null,
+    "cron": "* * * * *",
+    "createdAt": "2026-05-08T09:46:36.016Z",
+    "startedAt": "2026-05-08T09:47:00.006Z",
+    "completedAt": "2026-05-08T09:49:13.532Z",
+    "status": "cancelled",
+    "skipPermissions": true,
+    "openInTerminal": true,
+    "workingDirectory": null,
+    "model": null,
+    "output": null,
+    "error": null,
+    "lastRunAt": "2026-05-08T09:49:00.005Z",
+    "runCount": 3,
+    "runHistory": [
+      "2026-05-08T09:47:00.006Z",
+      "2026-05-08T09:48:00.004Z",
+      "2026-05-08T09:49:00.005Z"
+    ],
+    "tmuxSession": null
+  },
+  {
+    "id": "d41e689b-a89f-4025-b70a-c434bb045f12",
+    "prompt": "Write a haiku about coding, then wait 30 seconds, then write another haiku",
+    "scheduleType": "immediate",
+    "scheduledAt": null,
+    "cron": null,
+    "createdAt": "2026-05-08T09:52:29.331Z",
+    "startedAt": "2026-05-08T09:52:29.339Z",
+    "completedAt": "2026-05-09T08:45:56.342Z",
+    "status": "failed",
+    "skipPermissions": true,
+    "openInTerminal": true,
+    "workingDirectory": null,
+    "model": null,
+    "output": null,
+    "error": "Server restarted during execution",
+    "lastRunAt": "2026-05-08T09:52:29.339Z",
+    "runCount": 1,
+    "runHistory": [
+      "2026-05-08T09:52:29.339Z"
+    ],
+    "tmuxSession": "task-d41e689b"
+  },
+  {
+    "id": "b1d2e370-88d6-4079-8dab-ed0b7fd18ad6",
+    "prompt": "echo test done",
+    "scheduleType": "immediate",
+    "scheduledAt": null,
+    "cron": null,
+    "createdAt": "2026-05-09T08:46:02.739Z",
+    "startedAt": "2026-05-09T08:46:02.747Z",
+    "completedAt": "2026-05-11T08:06:42.978Z",
+    "status": "failed",
+    "skipPermissions": true,
+    "openInTerminal": true,
+    "workingDirectory": null,
+    "model": null,
+    "output": null,
+    "error": "Server restarted during execution",
+    "lastRunAt": "2026-05-09T08:46:02.747Z",
+    "runCount": 1,
+    "runHistory": [
+      "2026-05-09T08:46:02.747Z"
+    ],
+    "tmuxSession": "task-b1d2e370"
+  }
+]
