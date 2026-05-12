@@ -7,14 +7,16 @@ As you work with Claude Code across many projects, sessions accumulate quickly a
 ## Features
 
 - **Browse all sessions** grouped by project, with message count, branch, dates, and disk size
-- **Search** across session summaries, prompts, branches, and custom titles
+- **Favorites** — star sessions, dedicated Favorites folder in sidebar, persistent across restarts
+- **Search** — fuzzy matching, regex mode, relevance scoring across titles, prompts, branches
 - **AI Deep Search** — when local search finds nothing, use Claude to semantically match sessions
 - **Sort** by modified time, created time, message count, or context size
 - **View session messages** — read conversation history with clean formatting (system tags stripped)
-- **Resume sessions** — open a terminal and run `claude --resume <id>` with one click
+- **Resume sessions** — editable command dialog, terminal selector (iTerm2/Terminal.app), skip-permissions option
+- **Scheduler** — cron tasks with AI natural language parsing, tmux session management, live output
 - **Delete sessions** — single or batch delete with confirmation, cleans up all related files
 - **Rename sessions** — manual or AI-powered auto-rename with background progress indicator
-- **Empty detection** — automatically flags cleared/abandoned sessions with reason (No conversation, Exited immediately, Cleared, etc.)
+- **Empty detection** — flags cleared/abandoned sessions (//clear, //exit, Goodbye, no conversation)
 - **Auto port detection** — finds a free port automatically if default 3000 is in use
 - **Dark theme** — easy on the eyes
 
@@ -108,17 +110,57 @@ claude-session-mgr/
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/stats` | Dashboard overview |
 | GET | `/api/projects` | List all projects with session counts |
 | GET | `/api/projects/:dirName/sessions` | List sessions for a project |
 | GET | `/api/sessions/:sessionId/messages` | View session messages |
-| GET | `/api/search?q=&project=&branch=&empty=` | Search sessions |
+| GET | `/api/search?q=&project=&empty=&mode=&favorite=` | Search sessions (fuzzy/regex) |
 | POST | `/api/search/deep` | AI-powered semantic search |
-| GET | `/api/stats` | Dashboard overview |
 | DELETE | `/api/sessions/:sessionId` | Delete a session |
 | POST | `/api/sessions/batch-delete` | Batch delete sessions |
 | PUT | `/api/sessions/:sessionId/title` | Set custom title |
+| PUT | `/api/sessions/:sessionId/favorite` | Toggle favorite |
 | POST | `/api/sessions/:sessionId/auto-rename` | AI auto-rename |
 | POST | `/api/sessions/:sessionId/resume` | Open terminal and resume |
+| GET | `/api/sessions/preferences` | Get terminal preferences |
+| PUT | `/api/sessions/preferences` | Set terminal preferences |
+| GET | `/api/scheduler/tasks` | List scheduled tasks |
+| POST | `/api/scheduler/tasks` | Create a scheduled task |
+| DELETE | `/api/scheduler/tasks/:id` | Delete a task |
+| POST | `/api/scheduler/tasks/:id/run` | Run task immediately |
+| POST | `/api/scheduler/generate-cron` | AI: natural language to cron |
+| GET | `/api/scheduler/capabilities` | Check tmux availability |
+
+## Publishing / Release
+
+Releases are automated via GitHub Actions. To publish a new version to npm:
+
+```bash
+# 1. Bump version in package.json
+npm version patch   # or minor / major
+
+# 2. Push commit and tag
+git push && git push --tags
+
+# 3. Create a GitHub Release (triggers CI)
+gh release create v<version> --title "v<version>" --generate-notes
+```
+
+The workflow (`.github/workflows/publish.yml`) will:
+1. Checkout the tagged commit
+2. Install client dependencies and build the frontend
+3. Publish to npm with provenance
+
+**Prerequisites:**
+- `NPM_TOKEN` secret configured in GitHub repo settings (Settings > Secrets > Actions)
+- The token needs `publish` permission on the npm package
+
+**Manual publish (fallback):**
+```bash
+npm login
+cd client && npm install && npm run build && cd ..
+npm publish --access public
+```
 
 ## Tech Stack
 
@@ -127,13 +169,14 @@ claude-session-mgr/
 - **Backend**: TypeScript + Express (runs via [tsx](https://github.com/privatenumber/tsx), no compile step)
 - **Testing**: Vitest + supertest + @testing-library/react
 - **AI features**: Claude Code CLI (`claude -p`) for auto-rename and deep search
-- **CI/CD**: GitHub Actions for automated npm publishing
+- **CI/CD**: GitHub Actions for automated npm publishing on release
 
 ## Requirements
 
 - Node.js 18+
 - Claude Code CLI installed and configured (for AI features)
 - macOS (terminal integration uses AppleScript for iTerm2/Terminal.app)
+- tmux (optional, for scheduler terminal session management)
 
 ## License
 
