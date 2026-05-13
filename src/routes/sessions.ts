@@ -147,37 +147,37 @@ router.post('/batch-rename', (req: Request, res: Response) => {
   // Pause background AI scanner to avoid API overload
   aiScanner.pause();
 
-  // Process sequentially
-  let idx = 0;
   let cancelled = false;
+  const CONCURRENCY = 3;
 
-  async function next() {
-    if (idx >= toRename.length || cancelled) {
-      aiScanner.resume();
-      res.write(`data: ${JSON.stringify({ type: 'complete', done, failed, skipped: sessionIds.length - total, total })}\n\n`);
-      res.end();
-      return;
+  (async () => {
+    for (let i = 0; i < toRename.length; i += CONCURRENCY) {
+      if (cancelled) break;
+
+      const batch = toRename.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async ({ sessionId }) => {
+        if (cancelled) return;
+        try {
+          const title = await generateTitle(sessionId);
+          if (title) {
+            scanner.setTitle(sessionId, title);
+            done++;
+            res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'done', title, done: done + failed, total })}\n\n`);
+          } else {
+            failed++;
+            res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
+          }
+        } catch {
+          failed++;
+          res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
+        }
+      }));
     }
 
-    const { sessionId } = toRename[idx++];
-    try {
-      const title = await generateTitle(sessionId);
-      if (title) {
-        scanner.setTitle(sessionId, title);
-        done++;
-        res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'done', title, done: done + failed, total })}\n\n`);
-      } else {
-        failed++;
-        res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
-      }
-    } catch {
-      failed++;
-      res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
-    }
-    next();
-  }
-
-  next();
+    aiScanner.resume();
+    res.write(`data: ${JSON.stringify({ type: 'complete', done, failed, skipped: sessionIds.length - total, total })}\n\n`);
+    res.end();
+  })();
 
   req.on('close', () => { cancelled = true; aiScanner.resume(); });
 });
