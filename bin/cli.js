@@ -4,6 +4,7 @@ const { execSync, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const http = require('http');
 
 // Check if claude CLI is available
 try {
@@ -25,6 +26,39 @@ function findFreePort(startPort) {
   });
 }
 
+function waitForServer(port, timeout = 30000) {
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    function check() {
+      if (Date.now() - start > timeout) {
+        return reject(new Error('Server startup timed out'));
+      }
+      const req = http.get(`http://localhost:${port}/api/stats`, (res) => {
+        if (res.statusCode === 200) {
+          resolve();
+        } else {
+          setTimeout(check, 300);
+        }
+      });
+      req.on('error', () => setTimeout(check, 300));
+      req.setTimeout(2000, () => { req.destroy(); setTimeout(check, 300); });
+    }
+    check();
+  });
+}
+
+function openBrowser(url) {
+  try {
+    if (process.platform === 'darwin') {
+      execSync(`open "${url}"`, { stdio: 'ignore' });
+    } else if (process.platform === 'win32') {
+      execSync(`start "${url}"`, { stdio: 'ignore' });
+    } else {
+      execSync(`xdg-open "${url}"`, { stdio: 'ignore' });
+    }
+  } catch {}
+}
+
 async function main() {
   const preferredPort = parseInt(process.env.PORT, 10) || 3000;
   const port = await findFreePort(preferredPort);
@@ -33,23 +67,7 @@ async function main() {
     console.log(`Port ${preferredPort} is in use, using ${port} instead.`);
   }
 
-  // Auto-open browser after server starts (unless --no-open flag)
   const noOpen = process.argv.includes('--no-open');
-
-  if (!noOpen) {
-    setTimeout(() => {
-      const url = `http://localhost:${port}`;
-      try {
-        if (process.platform === 'darwin') {
-          execSync(`open "${url}"`, { stdio: 'ignore' });
-        } else if (process.platform === 'win32') {
-          execSync(`start "${url}"`, { stdio: 'ignore' });
-        } else {
-          execSync(`xdg-open "${url}"`, { stdio: 'ignore' });
-        }
-      } catch {}
-    }, 2000);
-  }
 
   // Find tsx binary
   const possibleTsxPaths = [
@@ -79,6 +97,17 @@ async function main() {
   process.on('SIGTERM', () => {
     child.kill('SIGTERM');
   });
+
+  // Wait for server to be ready before opening browser
+  if (!noOpen) {
+    waitForServer(port).then(() => {
+      const url = `http://localhost:${port}`;
+      console.log(`Opening browser: ${url}`);
+      openBrowser(url);
+    }).catch(() => {
+      // Server failed to start, don't open browser
+    });
+  }
 }
 
 main();

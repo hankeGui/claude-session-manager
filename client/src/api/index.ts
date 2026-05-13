@@ -126,6 +126,13 @@ export const api = {
       method: 'POST',
     }),
 
+  batchRename: (sessionIds: string[]) =>
+    fetch('/api/sessions/batch-rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionIds }),
+    }),
+
   resume: (sessionId: string, skipPermissions = false, terminal?: string) =>
     request<{ success: boolean; terminal: string; cwd: string }>(`/api/sessions/${sessionId}/resume`, {
       method: 'POST',

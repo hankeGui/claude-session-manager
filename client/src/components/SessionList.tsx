@@ -12,6 +12,7 @@ export default function SessionList() {
   const loading = useStore((s) => s.loading);
   const selectAll = useStore((s) => s.selectAll);
   const batchDelete = useStore((s) => s.batchDelete);
+  const startBatchRename = useStore((s) => s.startBatchRename);
   const searchQuery = useStore((s) => s.searchQuery);
   const doDeepSearch = useStore((s) => s.doDeepSearch);
   const currentProject = useStore((s) => s.currentProject);
@@ -64,12 +65,20 @@ export default function SessionList() {
               {allSelected ? 'Unselect All' : 'Select All'}
             </button>
             {selected.size > 0 && (
-              <button
-                onClick={handleBatchDelete}
-                className="px-3 py-1.5 border border-danger rounded-md text-danger text-xs hover:bg-danger hover:text-white"
-              >
-                Delete ({selected.size})
-              </button>
+              <>
+                <button
+                  onClick={startBatchRename}
+                  className="px-3 py-1.5 border border-accent rounded-md text-accent text-xs hover:bg-accent hover:text-black"
+                >
+                  AI Rename ({selected.size})
+                </button>
+                <button
+                  onClick={handleBatchDelete}
+                  className="px-3 py-1.5 border border-danger rounded-md text-danger text-xs hover:bg-danger hover:text-white"
+                >
+                  Delete ({selected.size})
+                </button>
+              </>
             )}
           </div>
         )}

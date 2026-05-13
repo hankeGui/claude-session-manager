@@ -8,6 +8,7 @@ import SchedulerView from './components/scheduler/SchedulerView';
 import Toast from './components/Toast';
 import ConfirmDialog from './components/ConfirmDialog';
 import AiTaskIndicator from './components/AiTaskIndicator';
+import BatchRenameIndicator from './components/BatchRenameIndicator';
 
 export default function App() {
   const loadStats = useStore((s) => s.loadStats);
@@ -38,6 +39,7 @@ export default function App() {
       <Toast />
       <ConfirmDialog />
       <AiTaskIndicator />
+      <BatchRenameIndicator />
     </div>
   );
 }

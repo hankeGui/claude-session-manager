@@ -15,6 +15,15 @@ export interface AiTask {
   error?: string;
 }
 
+export interface BatchRenameState {
+  running: boolean;
+  total: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  results: { sessionId: string; title?: string; status: 'done' | 'error' }[];
+}
+
 interface AppState {
   currentView: AppView;
   projects: Project[];
@@ -30,6 +39,7 @@ interface AppState {
   loading: boolean;
   aiTask: AiTask | null;
   aiTaskMinimized: boolean;
+  batchRename: BatchRenameState | null;
 
   // Actions
   setView: (view: AppView) => void;
@@ -55,6 +65,8 @@ interface AppState {
   startAiRename: (sessionId: string, sessionTitle: string) => void;
   dismissAiTask: () => void;
   toggleAiTaskMinimized: () => void;
+  startBatchRename: () => void;
+  dismissBatchRename: () => void;
   refresh: () => Promise<void>;
 }
 
@@ -73,6 +85,7 @@ export const useStore = create<AppState>((set, get) => ({
   loading: true,
   aiTask: null,
   aiTaskMinimized: false,
+  batchRename: null,
 
   setView: (view) => set({ currentView: view }),
 
@@ -278,6 +291,62 @@ export const useStore = create<AppState>((set, get) => ({
   dismissAiTask: () => set({ aiTask: null }),
 
   toggleAiTaskMinimized: () => set((state) => ({ aiTaskMinimized: !state.aiTaskMinimized })),
+
+  startBatchRename: () => {
+    const { selected, batchRename } = get();
+    if (batchRename?.running) return;
+    const sessionIds = [...selected];
+    if (sessionIds.length === 0) return;
+
+    set({ batchRename: { running: true, total: 0, done: 0, failed: 0, skipped: 0, results: [] } });
+
+    api.batchRename(sessionIds).then(async (response) => {
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'start') {
+              set((s) => ({ batchRename: { ...s.batchRename!, total: event.total, skipped: event.skipped } }));
+            } else if (event.type === 'progress') {
+              set((s) => {
+                const br = { ...s.batchRename! };
+                if (event.status === 'done') {
+                  br.done++;
+                  br.results = [...br.results, { sessionId: event.sessionId, title: event.title, status: 'done' }];
+                } else {
+                  br.failed++;
+                  br.results = [...br.results, { sessionId: event.sessionId, status: 'error' }];
+                }
+                return {
+                  batchRename: br,
+                  sessions: event.title
+                    ? s.sessions.map((sess) => sess.sessionId === event.sessionId ? { ...sess, customTitle: event.title } : sess)
+                    : s.sessions,
+                };
+              });
+            } else if (event.type === 'complete') {
+              set((s) => ({ batchRename: { ...s.batchRename!, running: false } }));
+            }
+          } catch {}
+        }
+      }
+    }).catch(() => {
+      set((s) => ({ batchRename: s.batchRename ? { ...s.batchRename, running: false } : null }));
+    });
+  },
+
+  dismissBatchRename: () => set({ batchRename: null }),
 
   refresh: async () => {
     await Promise.all([get().loadStats(), get().loadProjects()]);

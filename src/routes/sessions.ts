@@ -71,6 +71,78 @@ router.post('/batch-delete', async (req: Request, res: Response) => {
   res.json(result);
 });
 
+// Batch AI rename with SSE progress streaming
+router.post('/batch-rename', (req: Request, res: Response) => {
+  const { sessionIds } = req.body;
+  if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+    return res.status(400).json({ error: 'sessionIds array required' });
+  }
+
+  // Filter: skip sessions that already have a custom title or are empty
+  const toRename: { sessionId: string; project: any }[] = [];
+  for (const id of sessionIds) {
+    const found = scanner.getSessionById(id);
+    if (!found) continue;
+    const { session, project } = found;
+    if (session.customTitle) continue; // already renamed
+    if (session.isEmpty) continue; // empty session
+    toRename.push({ sessionId: id, project });
+  }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const total = toRename.length;
+  let done = 0;
+  let failed = 0;
+
+  if (total === 0) {
+    res.write(`data: ${JSON.stringify({ type: 'complete', done: 0, failed: 0, skipped: sessionIds.length, total: 0 })}\n\n`);
+    res.end();
+    return;
+  }
+
+  res.write(`data: ${JSON.stringify({ type: 'start', total, skipped: sessionIds.length - total })}\n\n`);
+
+  // Process sequentially to avoid overloading Claude
+  let idx = 0;
+  function next() {
+    if (idx >= toRename.length) {
+      res.write(`data: ${JSON.stringify({ type: 'complete', done, failed, skipped: sessionIds.length - total, total })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const { sessionId, project } = toRename[idx++];
+    const cwd = project.projectPath || process.env.HOME;
+    const prompt = 'Based on the conversation history in this session, generate a short descriptive title (under 50 characters, in the same language as the conversation). Output ONLY the title text, nothing else.';
+    const cmd = `claude -p "${prompt.replace(/"/g, '\\"')}" --resume ${sessionId} --no-session-persistence --bare < /dev/null`;
+
+    exec(cmd, { cwd, timeout: 30000 }, (err, stdout) => {
+      if (err || !stdout.trim()) {
+        failed++;
+        res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
+      } else {
+        const title = stdout.trim().replace(/^["']|["']$/g, '');
+        scanner.setTitle(sessionId, title);
+        done++;
+        res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'done', title, done: done + failed, total })}\n\n`);
+      }
+      next();
+    });
+  }
+
+  next();
+
+  // Clean up on client disconnect
+  req.on('close', () => {
+    idx = toRename.length; // stop processing
+  });
+});
+
 router.post('/:sessionId/auto-rename', (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const found = scanner.getSessionById(sessionId);
