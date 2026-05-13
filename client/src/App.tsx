@@ -9,6 +9,7 @@ import Toast from './components/Toast';
 import ConfirmDialog from './components/ConfirmDialog';
 import AiTaskIndicator from './components/AiTaskIndicator';
 import BatchRenameIndicator from './components/BatchRenameIndicator';
+import AiScanProgress from './components/AiScanProgress';
 
 export default function App() {
   const loadStats = useStore((s) => s.loadStats);
@@ -40,6 +41,7 @@ export default function App() {
       <ConfirmDialog />
       <AiTaskIndicator />
       <BatchRenameIndicator />
+      <AiScanProgress />
     </div>
   );
 }

@@ -53,8 +53,9 @@ export default function SessionList() {
       {/* Batch actions */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-base font-medium">
-          {currentProject ? '' : 'Select a project'}
-          {sessions.length > 0 && `${sessions.length} sessions`}
+          {sessions.length > 0
+            ? `${sessions.length} sessions`
+            : (currentProject ? 'No sessions' : 'Select a project')}
         </h2>
         {sessions.length > 0 && (
           <div className="flex gap-2 items-center">
@@ -67,7 +68,7 @@ export default function SessionList() {
             {selected.size > 0 && (
               <>
                 <button
-                  onClick={startBatchRename}
+                  onClick={() => startBatchRename()}
                   className="px-3 py-1.5 border border-accent rounded-md text-accent text-xs hover:bg-accent hover:text-black"
                 >
                   AI Rename ({selected.size})

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, Message, Session } from '../api';
 import { useStore } from '../store';
 import { showToast } from './Toast';
+import { confirm } from './ConfirmDialog';
 import ResumeDialog from './ResumeDialog';
 import MessageView from './MessageView';
 
@@ -25,19 +26,27 @@ export default function SessionModal({ session, onClose }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'user'>('all');
+  const [showNoise, setShowNoise] = useState(false);
+  const [hasHiddenNoise, setHasHiddenNoise] = useState(false);
   const [projectInfo, setProjectInfo] = useState<{ displayName: string } | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const setFavorite = useStore((s) => s.setFavorite);
   const setTitle = useStore((s) => s.setTitle);
 
   useEffect(() => {
     setLoading(true);
-    api.getMessages(session.sessionId).then((data) => {
+    api.getMessages(session.sessionId, 500, showNoise).then((data) => {
       setMessages(data.messages);
       setProjectInfo(data.project);
+      if (data.session.summary) setAiSummary(data.session.summary);
+      // Detect if there are hidden noise messages
+      if (data.totalUnfiltered && data.totalUnfiltered > data.messages.length) {
+        setHasHiddenNoise(true);
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [session.sessionId]);
+  }, [session.sessionId, showNoise]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -63,11 +72,11 @@ export default function SessionModal({ session, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex justify-between items-center px-5 py-4 border-b border-border">
-          <h3 className="text-base font-medium truncate mr-4">{title}</h3>
+        <div className="flex justify-between items-center px-5 py-4 border-b border-border overflow-hidden">
+          <h3 className="text-base font-medium truncate mr-4 min-w-0 flex-1" title={title}>{title}</h3>
           <button
             onClick={onClose}
-            className="text-xl text-text-muted hover:text-text-primary border-none bg-transparent cursor-pointer"
+            className="text-xl text-text-muted hover:text-text-primary border-none bg-transparent cursor-pointer shrink-0"
           >
             &times;
           </button>
@@ -83,6 +92,41 @@ export default function SessionModal({ session, onClose }: Props) {
           <span>Modified: {formatDate(session.modified)}</span>
         </div>
 
+        {/* Summary */}
+        <div className="px-5 py-3 text-sm text-text-primary border-b border-border bg-bg-card/30 flex items-start gap-2">
+          <div className="flex-1">
+            <span className="text-xs text-text-muted mr-2">Summary:</span>
+            {aiSummary ? (
+              aiSummary.includes('\n') ? (
+                <ul className="mt-1 ml-4 list-disc text-xs text-text-primary space-y-0.5">
+                  {aiSummary.split('\n').filter(l => l.trim()).map((line, i) => (
+                    <li key={i}>{line.replace(/^[-•*]\s*/, '')}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span>{aiSummary}</span>
+              )
+            ) : (
+              <span className="text-text-muted italic">No summary yet</span>
+            )}
+          </div>
+          <button
+            onClick={async () => {
+              setAiSummary('Generating...');
+              try {
+                const res = await api.regenerateSummary(session.sessionId);
+                setAiSummary(res.summary);
+              } catch {
+                setAiSummary(aiSummary === 'Generating...' ? null : aiSummary);
+                showToast('Failed to generate summary', 'error');
+              }
+            }}
+            className="text-[10px] text-text-muted hover:text-accent whitespace-nowrap shrink-0"
+          >
+            {aiSummary === 'Generating...' ? '...' : 'Regenerate'}
+          </button>
+        </div>
+
         {/* Actions */}
         <div className="flex items-center gap-2 px-5 py-2 border-b border-border">
           <button
@@ -95,12 +139,47 @@ export default function SessionModal({ session, onClose }: Props) {
           <button
             onClick={async () => {
               const currentTitle = session.customTitle || session.summary || session.firstPrompt || '';
-              const newTitle = prompt('Rename session:', currentTitle);
-              if (newTitle !== null) {
-                try {
-                  await setTitle(session.sessionId, newTitle);
-                  showToast(newTitle ? 'Title updated' : 'Title removed', 'success');
-                } catch (err: any) { showToast(err.message, 'error'); }
+              const { confirmed } = await confirm({
+                title: 'Rename Session',
+                message: `<div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <input id="rename-input" type="text" value="${currentTitle.replace(/"/g, '&quot;')}"
+                      placeholder="Enter new title..."
+                      style="flex:1;padding:8px 12px;border:1px solid #2a3a5e;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:14px;" />
+                    <button id="ai-gen-btn" type="button"
+                      style="padding:6px 12px;border:1px solid #ffa726;border-radius:6px;background:transparent;color:#ffa726;font-size:12px;cursor:pointer;white-space:nowrap">
+                      AI Generate
+                    </button>
+                  </div>
+                </div>`,
+                html: true,
+                okText: 'Save',
+                okClass: 'success',
+                onMount: (close) => {
+                  const btn = document.getElementById('ai-gen-btn');
+                  if (btn) {
+                    btn.onclick = (ev) => {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      const { aiTask } = useStore.getState();
+                      if (aiTask && aiTask.status === 'running') {
+                        showToast('AI task already running, please wait', 'error');
+                        return;
+                      }
+                      useStore.getState().startAiRename(session.sessionId, currentTitle);
+                      close();
+                    };
+                  }
+                },
+              });
+              if (!confirmed) return;
+              const input = document.getElementById('rename-input') as HTMLInputElement;
+              const newTitle = input?.value ?? '';
+              try {
+                await setTitle(session.sessionId, newTitle);
+                showToast(newTitle ? 'Title updated' : 'Title removed', 'success');
+              } catch (err: any) {
+                showToast(err.message, 'error');
               }
             }}
             className="px-2.5 py-1 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-black"
@@ -115,6 +194,17 @@ export default function SessionModal({ session, onClose }: Props) {
           </button>
 
           <div className="ml-auto flex items-center gap-2">
+            {hasHiddenNoise && (
+              <label className="flex items-center gap-1 text-[11px] text-text-muted cursor-pointer mr-2">
+                <input
+                  type="checkbox"
+                  checked={showNoise}
+                  onChange={(e) => setShowNoise(e.target.checked)}
+                  className="cursor-pointer"
+                />
+                Show all
+              </label>
+            )}
             <button
               onClick={() => setFilter('all')}
               className={`px-3 py-1 text-xs rounded-md border ${

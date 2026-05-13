@@ -75,13 +75,14 @@ function checkExistingInstance(port) {
 }
 
 async function main() {
+  const pkg = require(path.join(__dirname, '..', 'package.json'));
   const preferredPort = parseInt(process.env.PORT, 10) || 3000;
 
   // Check if an instance is already running on the preferred port
   const existing = await checkExistingInstance(preferredPort);
   if (existing) {
     const url = `http://localhost:${preferredPort}`;
-    console.log(`Claude Session Manager is already running at ${url}`);
+    console.log(`Claude Session Manager v${pkg.version} is already running at ${url}`);
     if (!process.argv.includes('--no-open')) {
       openBrowser(url);
     }

@@ -63,7 +63,7 @@ export default function ConfirmDialog() {
       onClick={() => { state.resolve({ confirmed: false }); setState(null); }}
     >
       <div
-        className="bg-bg-secondary border border-border rounded-lg p-6 max-w-[400px] w-full"
+        className="bg-bg-secondary border border-border rounded-lg p-6 max-w-[500px] w-full"
         onClick={(e) => e.stopPropagation()}
       >
         {state.title && (

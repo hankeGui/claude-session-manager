@@ -46,13 +46,13 @@ export default function BatchRenameIndicator() {
 
       {/* Recent results */}
       <div className="px-4 py-2 max-h-[160px] overflow-y-auto">
-        {results.slice(-5).reverse().map((r, i) => (
+        {results.slice(-8).reverse().map((r, i) => (
           <div key={i} className="flex items-center gap-2 text-[11px] py-0.5">
-            <span className={r.status === 'done' ? 'text-success' : 'text-danger'}>
-              {r.status === 'done' ? '✓' : '✗'}
+            <span className={r.status === 'done' ? 'text-success' : r.status === 'skipped' ? 'text-text-muted' : 'text-danger'}>
+              {r.status === 'done' ? '✓' : r.status === 'skipped' ? '⊘' : '✗'}
             </span>
             <span className="truncate text-text-muted">
-              {r.title || r.sessionId.slice(0, 8)}
+              {r.status === 'skipped' ? `${r.sessionId.slice(0, 8)} · ${r.title}` : (r.title || r.sessionId.slice(0, 8))}
             </span>
           </div>
         ))}

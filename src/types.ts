@@ -20,6 +20,7 @@ export interface Session {
   emptyReason: string | null;
   isFavorite: boolean;
   tags: string[];
+  contentHash: string;
 }
 
 export interface ToolCall {

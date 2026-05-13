@@ -21,7 +21,7 @@ export interface BatchRenameState {
   done: number;
   failed: number;
   skipped: number;
-  results: { sessionId: string; title?: string; status: 'done' | 'error' }[];
+  results: { sessionId: string; title?: string; status: 'done' | 'error' | 'skipped' }[];
 }
 
 interface AppState {
@@ -65,9 +65,11 @@ interface AppState {
   startAiRename: (sessionId: string, sessionTitle: string) => void;
   dismissAiTask: () => void;
   toggleAiTaskMinimized: () => void;
-  startBatchRename: () => void;
+  startBatchRename: (forceAll?: boolean) => void;
   dismissBatchRename: () => void;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<{ success: boolean; projects: number; sessions: number; pending: { summaries: number; titles: number } }>;
+  aiScanStatus: { running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; result?: { summaries: number; titles: number; skipped: number } | null } | null;
+  startAiScanPoll: () => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -292,11 +294,43 @@ export const useStore = create<AppState>((set, get) => ({
 
   toggleAiTaskMinimized: () => set((state) => ({ aiTaskMinimized: !state.aiTaskMinimized })),
 
-  startBatchRename: () => {
-    const { selected, batchRename } = get();
+  startBatchRename: async (forceAll?: boolean) => {
+    const { selected, batchRename, sessions } = get();
     if (batchRename?.running) return;
-    const sessionIds = [...selected];
+    let sessionIds = [...selected];
     if (sessionIds.length === 0) return;
+
+    // Check if some sessions already have customTitle
+    if (!forceAll) {
+      const alreadyNamed = sessions.filter(s => sessionIds.includes(s.sessionId) && s.customTitle);
+      if (alreadyNamed.length > 0 && alreadyNamed.length === sessionIds.length) {
+        // All selected are already named — ask user
+        const { confirm } = await import('../components/ConfirmDialog');
+        const { confirmed } = await confirm({
+          title: 'All Selected Already Renamed',
+          message: `All ${alreadyNamed.length} selected sessions already have AI-generated titles. What would you like to do?`,
+          okText: 'Regenerate All',
+          okClass: 'success',
+        });
+        if (!confirmed) return;
+        // User wants to regenerate — pass force flag to backend
+      } else if (alreadyNamed.length > 0) {
+        const { confirm } = await import('../components/ConfirmDialog');
+        const { confirmed, checked } = await confirm({
+          title: 'Some Already Renamed',
+          message: `${alreadyNamed.length} of ${sessionIds.length} selected sessions already have titles.`,
+          okText: 'Continue',
+          okClass: 'success',
+          checkbox: { label: `Regenerate ${alreadyNamed.length} existing titles`, defaultChecked: false },
+        });
+        if (!confirmed) return;
+        if (!checked) {
+          // Skip already named ones
+          sessionIds = sessionIds.filter(id => !alreadyNamed.some(s => s.sessionId === id));
+          if (sessionIds.length === 0) return;
+        }
+      }
+    }
 
     set({ batchRename: { running: true, total: 0, done: 0, failed: 0, skipped: 0, results: [] } });
 
@@ -324,13 +358,15 @@ export const useStore = create<AppState>((set, get) => ({
                 if (event.status === 'done') {
                   br.done++;
                   br.results = [...br.results, { sessionId: event.sessionId, title: event.title, status: 'done' }];
+                } else if (event.status === 'skipped') {
+                  br.results = [...br.results, { sessionId: event.sessionId, title: event.reason, status: 'skipped' }];
                 } else {
                   br.failed++;
                   br.results = [...br.results, { sessionId: event.sessionId, status: 'error' }];
                 }
                 return {
                   batchRename: br,
-                  sessions: event.title
+                  sessions: event.title && event.status === 'done'
                     ? s.sessions.map((sess) => sess.sessionId === event.sessionId ? { ...sess, customTitle: event.title } : sess)
                     : s.sessions,
                 };
@@ -348,7 +384,34 @@ export const useStore = create<AppState>((set, get) => ({
 
   dismissBatchRename: () => set({ batchRename: null }),
 
+  aiScanStatus: null,
+
+  startAiScanPoll: () => {
+    let wasRunning = false;
+    const poll = async () => {
+      try {
+        const status = await api.getAiScanStatus();
+        if (status.running) {
+          wasRunning = true;
+          set({ aiScanStatus: status });
+        } else if (wasRunning) {
+          // Just finished — show result briefly then dismiss
+          wasRunning = false;
+          set({ aiScanStatus: { ...status, running: false } });
+          setTimeout(() => {
+            set({ aiScanStatus: null });
+            // Refresh session list to show new titles
+            get().loadSessions();
+          }, 3000);
+        }
+      } catch {}
+    };
+    poll();
+    setInterval(poll, 2000);
+  },
+
   refresh: async () => {
+    const result = await api.rescan();
     await Promise.all([get().loadStats(), get().loadProjects()]);
     const { currentProject, searchQuery } = get();
     if (searchQuery) {
@@ -356,6 +419,7 @@ export const useStore = create<AppState>((set, get) => ({
     } else if (currentProject) {
       get().loadSessions();
     }
+    return result;
   },
 }));
 

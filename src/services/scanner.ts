@@ -41,6 +41,7 @@ function saveFavorites(favorites: Record<string, boolean>): void {
 interface TagEntry {
   tags: string[];
   sources: string[];
+  contentHash?: string;
 }
 
 let tagStore: Record<string, TagEntry> = {};
@@ -71,17 +72,29 @@ export function getTags(sessionId: string): string[] {
   return tagStore[sessionId]?.tags || [];
 }
 
-/** Check if a specific extraction source has already run for this session */
+/** Check if a specific extraction source has already run for this session (and content hasn't changed) */
 export function hasTagSource(sessionId: string, source: string): boolean {
-  return tagStore[sessionId]?.sources?.includes(source) || false;
+  const entry = tagStore[sessionId];
+  if (!entry?.sources?.includes(source)) return false;
+  // If contentHash is tracked, verify it still matches
+  if (entry.contentHash) {
+    const found = getSessionById(sessionId);
+    if (found && found.session.contentHash && entry.contentHash !== found.session.contentHash) {
+      return false; // content changed, force re-extraction
+    }
+  }
+  return true;
 }
 
-/** Mark an extraction source as done for this session */
+/** Mark an extraction source as done for this session, storing current contentHash */
 export function markTagSource(sessionId: string, source: string): void {
   if (!tagStore[sessionId]) tagStore[sessionId] = { tags: [], sources: [] };
   if (!tagStore[sessionId].sources.includes(source)) {
     tagStore[sessionId].sources.push(source);
   }
+  // Store current contentHash for future invalidation checks
+  const found = getSessionById(sessionId);
+  if (found) tagStore[sessionId].contentHash = found.session.contentHash;
 }
 
 const IGNORE_TAGS = new Set(['head', 'master', 'main', 'users', 'home', 'tmp', 'var', 'opt', 'usr']);
@@ -180,6 +193,20 @@ export function removeTags(sessionId: string): void {
 
 /** Flush pending tag writes (for batch callers that use addTagInternal) */
 export function flushTags(): void { saveTags(); }
+
+export function clearTitles(): void {
+  saveTitles({});
+  for (const project of data.projects) {
+    for (const session of project.sessions) {
+      session.customTitle = null;
+    }
+  }
+}
+
+export function clearTags(): void {
+  tagStore = {};
+  saveTags();
+}
 
 export function setTitle(sessionId: string, title: string): void {
   const titles = loadTitles();
@@ -400,8 +427,11 @@ export async function scan(): Promise<void> {
       const jsonlPath = path.join(projectDir, file);
 
       let diskSize = 0;
+      let contentHash = '';
       try {
-        diskSize = fs.statSync(jsonlPath).size;
+        const stat = fs.statSync(jsonlPath);
+        diskSize = stat.size;
+        contentHash = `${stat.size}:${Math.floor(stat.mtimeMs)}`;
       } catch {}
 
       const indexed = indexedMap.get(sessionId);
@@ -422,6 +452,7 @@ export async function scan(): Promise<void> {
           dirName,
           isFavorite: !!favorites[sessionId],
           tags: getTags(sessionId),
+          contentHash,
         });
       } else {
         const meta = extractMetaFromJsonl(jsonlPath);
@@ -441,6 +472,7 @@ export async function scan(): Promise<void> {
           dirName,
           isFavorite: !!favorites[sessionId],
           tags: getTags(sessionId),
+          contentHash,
         });
       }
 
@@ -463,6 +495,7 @@ export async function scan(): Promise<void> {
         dirName,
         isFavorite: !!favorites[sessionId],
         tags: getTags(sessionId),
+        contentHash: '',
       });
     }
 

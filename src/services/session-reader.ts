@@ -6,12 +6,25 @@ import type { SessionMessage, ToolCall } from '../types';
 interface ReadResult {
   messages: SessionMessage[];
   total: number;
+  totalUnfiltered?: number;
 }
 
 interface RawEntry {
   type: string;
   timestamp?: string;
   message?: { content: string | any[] };
+}
+
+/** Check if a message is a noise/system command (exit, bye, no response, etc.) */
+function isNoiseMessage(text: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed) return true;
+  // Slash commands: /exit, //exit, /clear, /quit, etc.
+  if (/^\/{1,2}(clear|exit|quit|help|compact|config|status|doctor|login|logout|mcp|memory|review|init)\b/.test(trimmed)) return true;
+  // Exit signals
+  if (/^(→\s*)?(goodbye|bye)!?$/i.test(trimmed)) return true;
+  if (/^no response requested\.?$/i.test(trimmed)) return true;
+  return false;
 }
 
 function extractFromEntry(obj: RawEntry): { text: string; tools: ToolCall[]; isToolResult: boolean } {
@@ -46,6 +59,16 @@ function extractFromEntry(obj: RawEntry): { text: string; tools: ToolCall[]; isT
             tool.input = { pattern: inp.pattern };
           } else if (block.name === 'Glob' && inp.pattern) {
             tool.input = { pattern: inp.pattern };
+          } else if (block.name === 'Skill' && inp.skill) {
+            tool.input = { skill: inp.skill };
+          } else if (block.name === 'Agent' && (inp.description || inp.prompt)) {
+            tool.input = { description: (inp.description || inp.prompt || '').slice(0, 100) };
+          } else if (block.name === 'LSP' && inp.operation) {
+            tool.input = { operation: inp.operation, file_path: inp.filePath };
+          } else if (block.name === 'WebFetch' && inp.url) {
+            tool.input = { url: inp.url };
+          } else if (block.name === 'WebSearch' && inp.query) {
+            tool.input = { query: inp.query };
           }
         }
         tools.push(tool);
@@ -67,7 +90,7 @@ function extractFromEntry(obj: RawEntry): { text: string; tools: ToolCall[]; isT
 export async function readSessionMessages(
   dirName: string,
   sessionId: string,
-  { limit = 100, offset = 0 } = {}
+  { limit = 100, offset = 0, includeNoise = false } = {}
 ): Promise<ReadResult> {
   const filePath = sessionJsonlPath(dirName, sessionId);
 
@@ -140,9 +163,20 @@ export async function readSessionMessages(
   }
   flushAssistant();
 
-  // Apply pagination
-  const total = turns.length;
-  const paginated = turns.slice(offset, offset + limit);
+  // Filter noise messages unless explicitly included
+  const totalUnfiltered = turns.length;
+  const filtered = includeNoise
+    ? turns
+    : turns.filter((msg) => {
+        if (msg.type === 'user' && isNoiseMessage(msg.content)) return false;
+        // Skip assistant "no response" replies that follow noise (but keep tool-call turns)
+        if (msg.type === 'assistant' && !msg.toolCalls?.length && isNoiseMessage(msg.content)) return false;
+        return true;
+      });
 
-  return { messages: paginated, total };
+  // Apply pagination
+  const total = filtered.length;
+  const paginated = filtered.slice(offset, offset + limit);
+
+  return { messages: paginated, total, totalUnfiltered };
 }

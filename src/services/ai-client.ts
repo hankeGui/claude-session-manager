@@ -129,17 +129,28 @@ export function getClient(): { client: Anthropic; model: string } | null {
 
 /**
  * Simple helper: send a prompt, get text back. Uses smallModel.
+ * Includes a 30s timeout to prevent hanging.
  */
-export async function askAi(prompt: string, opts?: { maxTokens?: number }): Promise<string> {
+export async function askAi(prompt: string, opts?: { maxTokens?: number; timeoutMs?: number }): Promise<string> {
   const c = getClient();
   if (!c) throw new Error('AI not configured');
 
-  const response = await c.client.messages.create({
-    model: c.model,
-    max_tokens: opts?.maxTokens || 1024,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), opts?.timeoutMs || 30000);
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  return textBlock ? textBlock.text : '';
+  try {
+    const response = await c.client.messages.create(
+      {
+        model: c.model,
+        max_tokens: opts?.maxTokens || 1024,
+        messages: [{ role: 'user', content: prompt }],
+      },
+      { signal: controller.signal as any },
+    );
+
+    const textBlock = response.content.find((b) => b.type === 'text');
+    return textBlock ? textBlock.text : '';
+  } finally {
+    clearTimeout(timeout);
+  }
 }

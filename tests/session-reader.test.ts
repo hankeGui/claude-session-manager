@@ -200,4 +200,83 @@ describe('session-reader', () => {
     expect(result.messages[1].toolCalls!.map(t => t.name)).toEqual(['Read']);
     expect(result.messages[3].content).toBe('Answer 2');
   });
+
+  describe('noise message filtering', () => {
+    it('filters slash commands by default (includeNoise=false)', async () => {
+      const sid = 'noise-slash-1';
+      writeJsonl(sid, [
+        { type: 'user', message: { content: 'Hello' }, timestamp: 't0' },
+        { type: 'assistant', message: { content: 'Hi!' }, timestamp: 't1' },
+        { type: 'user', message: { content: '/exit' }, timestamp: 't2' },
+        { type: 'assistant', message: { content: 'Goodbye!' }, timestamp: 't3' },
+        { type: 'user', message: { content: '//clear' }, timestamp: 't4' },
+      ]);
+      const result = await readSessionMessages(FAKE_PROJECT, sid, { includeNoise: false });
+      expect(result.messages).toHaveLength(2); // only Hello + Hi!
+      expect(result.messages[0].content).toBe('Hello');
+      expect(result.totalUnfiltered).toBe(5);
+    });
+
+    it('includes noise when includeNoise=true', async () => {
+      const sid = 'noise-include-1';
+      writeJsonl(sid, [
+        { type: 'user', message: { content: 'Hello' }, timestamp: 't0' },
+        { type: 'assistant', message: { content: 'Hi!' }, timestamp: 't1' },
+        { type: 'user', message: { content: '/exit' }, timestamp: 't2' },
+      ]);
+      const result = await readSessionMessages(FAKE_PROJECT, sid, { includeNoise: true });
+      expect(result.messages).toHaveLength(3);
+    });
+
+    it('filters "Bye!" and "No response requested." messages', async () => {
+      const sid = 'noise-bye-1';
+      writeJsonl(sid, [
+        { type: 'user', message: { content: 'Do something' }, timestamp: 't0' },
+        { type: 'assistant', message: { content: 'Done!' }, timestamp: 't1' },
+        { type: 'user', message: { content: 'Bye!' }, timestamp: 't2' },
+        { type: 'assistant', message: { content: 'No response requested.' }, timestamp: 't3' },
+      ]);
+      const result = await readSessionMessages(FAKE_PROJECT, sid, { includeNoise: false });
+      expect(result.messages).toHaveLength(2);
+      expect(result.messages[0].content).toBe('Do something');
+      expect(result.messages[1].content).toBe('Done!');
+    });
+
+    it('filters //exit and /quit variants', async () => {
+      const sid = 'noise-variants-1';
+      writeJsonl(sid, [
+        { type: 'user', message: { content: 'Hi' }, timestamp: 't0' },
+        { type: 'assistant', message: { content: 'Hello' }, timestamp: 't1' },
+        { type: 'user', message: { content: '//exit' }, timestamp: 't2' },
+        { type: 'user', message: { content: '/quit' }, timestamp: 't3' },
+        { type: 'user', message: { content: '/compact' }, timestamp: 't4' },
+      ]);
+      const result = await readSessionMessages(FAKE_PROJECT, sid, { includeNoise: false });
+      expect(result.messages).toHaveLength(2);
+    });
+
+    it('does not filter normal messages that happen to contain slash', async () => {
+      const sid = 'noise-normal-1';
+      writeJsonl(sid, [
+        { type: 'user', message: { content: 'check the /etc/hosts file' }, timestamp: 't0' },
+        { type: 'assistant', message: { content: 'Here it is' }, timestamp: 't1' },
+      ]);
+      const result = await readSessionMessages(FAKE_PROJECT, sid, { includeNoise: false });
+      expect(result.messages).toHaveLength(2);
+    });
+
+    it('totalUnfiltered reflects pre-filter count', async () => {
+      const sid = 'noise-count-1';
+      writeJsonl(sid, [
+        { type: 'user', message: { content: 'Hello' }, timestamp: 't0' },
+        { type: 'assistant', message: { content: 'Hi' }, timestamp: 't1' },
+        { type: 'user', message: { content: '/exit' }, timestamp: 't2' },
+        { type: 'assistant', message: { content: 'No response requested.' }, timestamp: 't3' },
+        { type: 'user', message: { content: 'Goodbye!' }, timestamp: 't4' },
+      ]);
+      const result = await readSessionMessages(FAKE_PROJECT, sid, { includeNoise: false });
+      expect(result.totalUnfiltered).toBe(5);
+      expect(result.total).toBeLessThan(5);
+    });
+  });
 });

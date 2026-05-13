@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, ReactNode } from 'react';
 import { Session } from '../api';
 import { useStore } from '../store';
 import { confirm } from './ConfirmDialog';
@@ -8,6 +8,20 @@ import ResumeDialog from './ResumeDialog';
 interface Props {
   session: Session;
   onView: (session: Session) => void;
+}
+
+/** Highlight matching portions of text */
+function highlightText(text: string, query: string): ReactNode {
+  if (!query || !text) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-accent/30 text-inherit rounded-sm px-0.5">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
 }
 
 function formatDate(iso: string): string {
@@ -31,8 +45,11 @@ export default function SessionCard({ session, onView }: Props) {
   const setFavorite = useStore((s) => s.setFavorite);
   const [showResume, setShowResume] = useState(false);
 
+  const searchQuery = useStore((s) => s.searchQuery);
   const isSelected = selected.has(session.sessionId);
   const title = session.customTitle || session.summary || session.firstPrompt || session.sessionId.slice(0, 8);
+  const searchScore = session._searchScore as number | undefined;
+  const matchedFields = session._matchedFields as string[] | undefined;
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -125,19 +142,31 @@ export default function SessionCard({ session, onView }: Props) {
         {session.isFavorite ? '\u2605' : '\u2606'}
       </button>
       <div className="flex-1 min-w-0">
-        <div className={`text-sm font-medium truncate mb-1 ${session.customTitle ? 'text-accent font-semibold' : ''}`}>
-          {title}
+        <div className={`text-sm font-medium truncate mb-1 flex items-center gap-2 ${session.customTitle ? 'text-accent font-semibold' : ''}`} title={title}>
+          <span className="truncate">
+            {searchQuery && matchedFields?.includes('title') ? highlightText(title, searchQuery) : title}
+          </span>
+          {searchScore && (
+            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-normal">
+              {searchScore}
+              {matchedFields && matchedFields.length > 0 && (
+                <span className="ml-1 text-text-muted">{matchedFields.join(',')}</span>
+              )}
+            </span>
+          )}
         </div>
         {session.firstPrompt && session.firstPrompt !== title && (
-          <div className="text-xs text-text-muted truncate mb-1.5">{session.firstPrompt}</div>
+          <div className="text-xs text-text-muted truncate mb-1.5" title={session.firstPrompt}>
+            {searchQuery && matchedFields?.includes('firstPrompt') ? highlightText(session.firstPrompt, searchQuery) : session.firstPrompt}
+          </div>
         )}
         <div className="flex gap-3 text-[11px] text-text-muted flex-wrap">
           <span>{session.messageCount} msgs</span>
           <span>{formatSize(session.diskSize)}</span>
           <span>{formatDate(session.modified)}</span>
           {session.gitBranch && (
-            <span className="bg-bg-card text-accent px-1.5 py-0.5 rounded text-[10px]">
-              {session.gitBranch}
+            <span className={`bg-bg-card px-1.5 py-0.5 rounded text-[10px] ${searchQuery && matchedFields?.includes('branch') ? 'text-white bg-accent/30' : 'text-accent'}`}>
+              {searchQuery && matchedFields?.includes('branch') ? highlightText(session.gitBranch, searchQuery) : session.gitBranch}
             </span>
           )}
           {session.isEmpty && (
@@ -149,8 +178,8 @@ export default function SessionCard({ session, onView }: Props) {
         {session.tags && session.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {session.tags.map((tag) => (
-              <span key={tag} className="px-1.5 py-0.5 text-[10px] bg-accent/10 text-accent rounded">
-                {tag}
+              <span key={tag} className={`px-1.5 py-0.5 text-[10px] rounded ${searchQuery && matchedFields?.includes('tag') && tag.toLowerCase().includes(searchQuery.toLowerCase()) ? 'bg-accent/30 text-white' : 'bg-accent/10 text-accent'}`}>
+                {searchQuery && matchedFields?.includes('tag') ? highlightText(tag, searchQuery) : tag}
               </span>
             ))}
           </div>

@@ -46,6 +46,13 @@ export interface Stats {
   emptySessions: number;
   oldestSession: string | null;
   newestSession: string | null;
+  version: string;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  hasUpdate: boolean;
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -60,6 +67,21 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   getStats: () => request<Stats>('/api/stats'),
 
+  getAiScanStatus: () => request<{ running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; cached: number; result: { summaries: number; titles: number; skipped: number } | null }>('/api/ai-scan/status'),
+
+  startAiScan: () => request<{ success: boolean }>('/api/ai-scan/start', { method: 'POST' }),
+  pauseAiScan: () => request<{ success: boolean }>('/api/ai-scan/pause', { method: 'POST' }),
+  resumeAiScan: () => request<{ success: boolean }>('/api/ai-scan/resume', { method: 'POST' }),
+  stopAiScan: () => request<{ success: boolean }>('/api/ai-scan/stop', { method: 'POST' }),
+
+  checkUpdate: () => request<UpdateInfo>('/api/check-update'),
+
+  rescan: () => request<{ success: boolean; projects: number; sessions: number; pending: { summaries: number; titles: number } }>('/api/rescan', { method: 'POST' }),
+
+  forceRescan: () => request<{ success: boolean; pending: { summaries: number; titles: number } }>('/api/rescan/force', { method: 'POST' }),
+
+  clearCache: () => request<{ success: boolean; cleared: string[] }>('/api/clear-cache', { method: 'POST' }),
+
   getProjects: () => request<{ projects: Project[] }>('/api/projects'),
 
   getSessions: (dirName: string, params?: { sort?: string; order?: string; empty?: string }) => {
@@ -72,13 +94,14 @@ export const api = {
     );
   },
 
-  getMessages: (sessionId: string, limit = 500) =>
+  getMessages: (sessionId: string, limit = 500, includeNoise = false) =>
     request<{
       messages: Message[];
       hasMore: boolean;
+      totalUnfiltered?: number;
       session: Session;
       project: { dirName: string; displayName: string; projectPath: string };
-    }>(`/api/sessions/${sessionId}/messages?limit=${limit}`),
+    }>(`/api/sessions/${sessionId}/messages?limit=${limit}${includeNoise ? '&noise=1' : ''}`),
 
   search: (q: string, params?: { project?: string; empty?: string; mode?: string; favorite?: string }) => {
     const qs = new URLSearchParams({ q });
@@ -127,6 +150,11 @@ export const api = {
       method: 'POST',
     }),
 
+  regenerateSummary: (sessionId: string) =>
+    request<{ success: boolean; summary: string }>(`/api/sessions/${sessionId}/regenerate-summary`, {
+      method: 'POST',
+    }),
+
   batchRename: (sessionIds: string[]) =>
     fetch('/api/sessions/batch-rename', {
       method: 'POST',
@@ -134,11 +162,11 @@ export const api = {
       body: JSON.stringify({ sessionIds }),
     }),
 
-  resume: (sessionId: string, skipPermissions = false, terminal?: string) =>
+  resume: (sessionId: string, skipPermissions = false, terminal?: string, terminalApp?: string) =>
     request<{ success: boolean; terminal: string; cwd: string }>(`/api/sessions/${sessionId}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skipPermissions, terminal }),
+      body: JSON.stringify({ skipPermissions, terminal, terminalApp }),
     }),
 
   getPreferences: () =>

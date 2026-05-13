@@ -25,45 +25,74 @@ function fuzzyMatch(query: string, target: string): number {
   return qi === q.length ? score : 0;
 }
 
-function matchSession(session: Session, q: string, mode: string): number {
+interface MatchResult {
+  score: number;
+  matchedFields: string[];
+}
+
+const FIELD_NAMES = ['title', 'summary', 'firstPrompt', 'branch', 'sessionId'];
+
+function matchSession(session: Session, q: string, mode: string): MatchResult {
   const tags = session.tags || [];
-  const fields = [
+  const fieldValues = [
     session.customTitle || '',
     session.summary || '',
     session.firstPrompt || '',
     session.gitBranch || '',
     session.sessionId,
-    ...tags,
   ];
 
   if (mode === 'regex') {
     try {
       const re = new RegExp(q, 'i');
-      return fields.some(f => re.test(f)) ? 1 : 0;
+      const matched: string[] = [];
+      fieldValues.forEach((f, i) => { if (re.test(f)) matched.push(FIELD_NAMES[i]); });
+      tags.forEach(t => { if (re.test(t)) matched.push('tag'); });
+      return { score: matched.length > 0 ? 1 : 0, matchedFields: matched };
     } catch {
-      return 0; // invalid regex
+      return { score: 0, matchedFields: [] };
     }
   }
 
   const query = q.toLowerCase();
+  const matched: string[] = [];
 
   // Boost: if query looks like a number or ticket, check tags with PR# prefix
   if (/^\d+$/.test(q)) {
-    if (tags.some(t => t === `PR#${q}`)) return 200;
+    if (tags.some(t => t === `PR#${q}`)) return { score: 200, matchedFields: ['tag'] };
   }
   // Boost: exact tag match (e.g. "DC00-6266")
-  if (tags.some(t => t.toLowerCase() === query)) return 200;
+  if (tags.some(t => t.toLowerCase() === query)) return { score: 200, matchedFields: ['tag'] };
 
-  // Default: case-insensitive includes, fallback to fuzzy
-  if (fields.some(f => f.toLowerCase().includes(query))) return 100;
+  // Default: case-insensitive includes with weighted scoring
+  const FIELD_WEIGHTS: Record<string, number> = { title: 50, summary: 30, firstPrompt: 20, branch: 15, sessionId: 5 };
+  let totalScore = 0;
 
-  // Fuzzy fallback
+  fieldValues.forEach((f, i) => {
+    if (f.toLowerCase().includes(query)) {
+      matched.push(FIELD_NAMES[i]);
+      totalScore += FIELD_WEIGHTS[FIELD_NAMES[i]] || 10;
+    }
+  });
+  tags.forEach(t => {
+    if (t.toLowerCase().includes(query)) {
+      if (!matched.includes('tag')) matched.push('tag');
+      totalScore += 20;
+    }
+  });
+
+  if (matched.length > 0) return { score: totalScore, matchedFields: [...new Set(matched)] };
+
+  // Fuzzy fallback — require minimum quality (score >= query.length * 2 means mostly consecutive)
+  const minFuzzyScore = q.length * 2;
   let bestScore = 0;
-  for (const f of fields) {
+  let bestField = '';
+  fieldValues.forEach((f, i) => {
     const s = fuzzyMatch(q, f);
-    if (s > bestScore) bestScore = s;
-  }
-  return bestScore;
+    if (s > bestScore) { bestScore = s; bestField = FIELD_NAMES[i]; }
+  });
+  if (bestScore < minFuzzyScore) return { score: 0, matchedFields: [] };
+  return { score: bestScore, matchedFields: bestField ? [bestField] : [] };
 }
 
 router.get('/', (req: Request, res: Response) => {
@@ -71,7 +100,7 @@ router.get('/', (req: Request, res: Response) => {
     q?: string; project?: string; branch?: string; empty?: string; mode?: string; favorite?: string;
   };
   const data = scanner.getData();
-  const scored: { session: Session & { projectDisplayName: string; projectPath: string }; score: number }[] = [];
+  const scored: { session: Session & { projectDisplayName: string; projectPath: string; _searchScore?: number; _matchedFields?: string[] }; score: number }[] = [];
 
   for (const p of data.projects) {
     if (project && p.dirName !== project) continue;
@@ -83,10 +112,10 @@ router.get('/', (req: Request, res: Response) => {
       if (favorite === 'true' && !session.isFavorite) continue;
 
       if (q) {
-        const score = matchSession(session, q, mode || 'default');
+        const { score, matchedFields } = matchSession(session, q, mode || 'default');
         if (score <= 0) continue;
         scored.push({
-          session: { ...session, projectDisplayName: p.displayName, projectPath: p.projectPath },
+          session: { ...session, projectDisplayName: p.displayName, projectPath: p.projectPath, _searchScore: score, _matchedFields: matchedFields },
           score,
         });
       } else {
