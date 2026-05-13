@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { spawn } from 'child_process';
 import fs from 'fs';
 import * as scanner from '../services/scanner';
+import { askAi, getClient } from '../services/ai-client';
+import * as aiScanner from '../services/ai-scanner';
 import { sessionJsonlPath } from '../utils/paths';
 import type { Session } from '../types';
 
@@ -31,6 +32,7 @@ function matchSession(session: Session, q: string, mode: string): number {
     session.firstPrompt || '',
     session.gitBranch || '',
     session.sessionId,
+    ...(session.tags || []),
   ];
 
   if (mode === 'regex') {
@@ -97,10 +99,14 @@ router.get('/', (req: Request, res: Response) => {
   res.json({ results, total: results.length });
 });
 
-router.post('/deep', (req: Request, res: Response) => {
+router.post('/deep', async (req: Request, res: Response) => {
   const { q } = req.body;
   if (!q) {
     return res.status(400).json({ error: 'Query required' });
+  }
+
+  if (!getClient()) {
+    return res.status(400).json({ error: 'AI not configured', needsConfig: true });
   }
 
   const data = scanner.getData();
@@ -108,27 +114,33 @@ router.post('/deep', (req: Request, res: Response) => {
   const sessionSummaries: any[] = [];
   for (const p of data.projects) {
     for (const session of p.sessions) {
+      // Use cached AI summary if available, otherwise read JSONL
       let snippet = '';
-      try {
-        const filePath = sessionJsonlPath(session.dirName, session.sessionId);
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n');
-        const userMsgs: string[] = [];
-        for (const line of lines) {
-          if (!line.includes('"type":"user"')) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.type === 'user' && obj.message?.content) {
-              const text = typeof obj.message.content === 'string'
-                ? obj.message.content
-                : obj.message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ');
-              if (text.trim()) userMsgs.push(text.slice(0, 200));
-            }
-          } catch {}
-          if (userMsgs.length >= 5) break;
-        }
-        snippet = userMsgs.join(' | ');
-      } catch {}
+      const aiSummary = aiScanner.getSummary(session.sessionId);
+      if (aiSummary) {
+        snippet = aiSummary;
+      } else {
+        try {
+          const filePath = sessionJsonlPath(session.dirName, session.sessionId);
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const lines = content.split('\n');
+          const userMsgs: string[] = [];
+          for (const line of lines) {
+            if (!line.includes('"type":"user"')) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (obj.type === 'user' && obj.message?.content) {
+                const text = typeof obj.message.content === 'string'
+                  ? obj.message.content
+                  : obj.message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ');
+                if (text.trim()) userMsgs.push(text.slice(0, 200));
+              }
+            } catch {}
+            if (userMsgs.length >= 5) break;
+          }
+          snippet = userMsgs.join(' | ');
+        } catch {}
+      }
 
       sessionSummaries.push({
         id: session.sessionId,
@@ -150,20 +162,8 @@ ${JSON.stringify(sessionSummaries, null, 0)}
 Return ONLY a JSON array of session IDs that likely match the user's search query. Consider semantic meaning, not just keyword matching. If nothing matches, return an empty array [].
 Output format: ["id1", "id2", ...]`;
 
-  const child = spawn('claude', ['-p', '--no-session-persistence', '--bare'], {
-    timeout: 60000,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  let stdout = '';
-  let stderr = '';
-  child.stdout.on('data', (chunk: Buffer) => { stdout += chunk; });
-  child.stderr.on('data', (chunk: Buffer) => { stderr += chunk; });
-
-  child.on('close', (code: number | null) => {
-    if (code !== 0) {
-      return res.status(500).json({ error: 'AI search failed', detail: stderr || `exit code ${code}` });
-    }
+  try {
+    const stdout = await askAi(prompt, { maxTokens: 2048 });
 
     let matchedIds: string[] = [];
     try {
@@ -194,15 +194,15 @@ Output format: ["id1", "id2", ...]`;
       }
     }
 
+    // Auto-tag matched sessions with the search query
+    for (const id of matchedIds) {
+      scanner.addTag(id, q);
+    }
+
     res.json({ results, total: results.length, aiMatched: matchedIds.length });
-  });
-
-  child.on('error', (err: Error) => {
-    res.status(500).json({ error: 'Failed to spawn claude', detail: err.message });
-  });
-
-  child.stdin.write(prompt);
-  child.stdin.end();
+  } catch (err: any) {
+    res.status(500).json({ error: 'AI search failed', detail: err.message });
+  }
 });
 
 export default router;

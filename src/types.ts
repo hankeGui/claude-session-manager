@@ -19,6 +19,7 @@ export interface Session {
   isEmpty: boolean;
   emptyReason: string | null;
   isFavorite: boolean;
+  tags: string[];
 }
 
 export interface ToolCall {

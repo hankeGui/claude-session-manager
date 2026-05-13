@@ -22,6 +22,7 @@ export interface Session {
   isEmpty: boolean;
   emptyReason: string | null;
   isFavorite: boolean;
+  tags: string[];
   projectDisplayName?: string;
   projectPath?: string;
   [key: string]: any;

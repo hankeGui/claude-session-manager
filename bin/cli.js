@@ -59,12 +59,39 @@ function openBrowser(url) {
   } catch {}
 }
 
+function checkExistingInstance(port) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://localhost:${port}/api/stats`, (res) => {
+      if (res.statusCode === 200) {
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+      res.resume();
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(1000, () => { req.destroy(); resolve(false); });
+  });
+}
+
 async function main() {
   const preferredPort = parseInt(process.env.PORT, 10) || 3000;
+
+  // Check if an instance is already running on the preferred port
+  const existing = await checkExistingInstance(preferredPort);
+  if (existing) {
+    const url = `http://localhost:${preferredPort}`;
+    console.log(`Claude Session Manager is already running at ${url}`);
+    if (!process.argv.includes('--no-open')) {
+      openBrowser(url);
+    }
+    return;
+  }
+
   const port = await findFreePort(preferredPort);
 
   if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is in use, using ${port} instead.`);
+    console.log(`Port ${preferredPort} is in use by another app, using ${port} instead.`);
   }
 
   const noOpen = process.argv.includes('--no-open');

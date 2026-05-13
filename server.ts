@@ -5,8 +5,10 @@ import projectsRouter from './src/routes/projects';
 import sessionsRouter from './src/routes/sessions';
 import searchRouter from './src/routes/search';
 import schedulerRouter from './src/routes/scheduler';
+import settingsRouter from './src/routes/settings';
 import * as scanner from './src/services/scanner';
 import * as scheduler from './src/services/scheduler';
+import * as aiScanner from './src/services/ai-scanner';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +24,11 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/scheduler', schedulerRouter);
+app.use('/api/settings', settingsRouter);
+
+app.get('/api/ai-scan/status', (_req, res) => {
+  res.json(aiScanner.getStatus());
+});
 
 app.get('/api/stats', (_req, res) => {
   const data = scanner.getData();
@@ -54,6 +61,9 @@ async function start() {
 
   scheduler.init();
   console.log('Scheduler initialized');
+
+  // Background AI scan — fire and forget
+  aiScanner.start();
 
   app.listen(PORT, () => {
     console.log(`Claude Session Manager running at http://localhost:${PORT}`);

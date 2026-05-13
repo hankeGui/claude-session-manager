@@ -146,6 +146,15 @@ export default function SessionCard({ session, onView }: Props) {
             </span>
           )}
         </div>
+        {session.tags && session.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {session.tags.map((tag) => (
+              <span key={tag} className="px-1.5 py-0.5 text-[10px] bg-accent/10 text-accent rounded">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
         <button

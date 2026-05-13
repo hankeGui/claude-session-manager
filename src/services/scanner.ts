@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { PROJECTS_DIR, projectDirToDisplayName, sessionsIndexPath } from '../utils/paths';
+import { removeSummary } from './ai-scanner';
 import type { Project, Session, ScannerData } from '../types';
 
 let data: ScannerData = { projects: [] };
 
 const TITLES_FILE = path.join(__dirname, '..', '..', 'session-titles.json');
 const FAVORITES_FILE = path.join(__dirname, '..', '..', 'session-favorites.json');
+const TAGS_FILE = path.join(__dirname, '..', '..', 'session-tags.json');
 
 function loadTitles(): Record<string, string> {
   try {
@@ -30,6 +32,39 @@ function loadFavorites(): Record<string, boolean> {
 
 function saveFavorites(favorites: Record<string, boolean>): void {
   fs.writeFileSync(FAVORITES_FILE, JSON.stringify(favorites, null, 2));
+}
+
+let tags: Record<string, string[]> = {};
+
+function loadTags(): void {
+  try {
+    tags = JSON.parse(fs.readFileSync(TAGS_FILE, 'utf-8'));
+  } catch {
+    tags = {};
+  }
+}
+
+function saveTags(): void {
+  fs.writeFileSync(TAGS_FILE, JSON.stringify(tags, null, 2));
+}
+
+export function getTags(sessionId: string): string[] {
+  return tags[sessionId] || [];
+}
+
+export function addTag(sessionId: string, tag: string): void {
+  if (!tags[sessionId]) tags[sessionId] = [];
+  const normalized = tag.trim();
+  if (!normalized || tags[sessionId].includes(normalized)) return;
+  tags[sessionId].push(normalized);
+  saveTags();
+  for (const project of data.projects) {
+    const session = project.sessions.find(s => s.sessionId === sessionId);
+    if (session) {
+      session.tags = tags[sessionId];
+      break;
+    }
+  }
 }
 
 export function setTitle(sessionId: string, title: string): void {
@@ -205,6 +240,7 @@ export async function scan(): Promise<void> {
   const projects: Project[] = [];
   const titles = loadTitles();
   const favorites = loadFavorites();
+  loadTags();
 
   let dirs: string[];
   try {
@@ -271,6 +307,7 @@ export async function scan(): Promise<void> {
           diskSize,
           dirName,
           isFavorite: !!favorites[sessionId],
+          tags: tags[sessionId] || [],
         });
       } else {
         const meta = extractMetaFromJsonl(jsonlPath);
@@ -289,6 +326,7 @@ export async function scan(): Promise<void> {
           diskSize,
           dirName,
           isFavorite: !!favorites[sessionId],
+          tags: tags[sessionId] || [],
         });
       }
 
@@ -310,6 +348,7 @@ export async function scan(): Promise<void> {
         diskSize: 0,
         dirName,
         isFavorite: !!favorites[sessionId],
+        tags: tags[sessionId] || [],
       });
     }
 
@@ -353,6 +392,13 @@ export function removeSession(sessionId: string): boolean {
     const idx = project.sessions.findIndex(s => s.sessionId === sessionId);
     if (idx !== -1) {
       project.sessions.splice(idx, 1);
+      // Clean up persisted metadata
+      const titles = loadTitles();
+      if (titles[sessionId]) { delete titles[sessionId]; saveTitles(titles); }
+      const favorites = loadFavorites();
+      if (favorites[sessionId]) { delete favorites[sessionId]; saveFavorites(favorites); }
+      if (tags[sessionId]) { delete tags[sessionId]; saveTags(); }
+      removeSummary(sessionId);
       return true;
     }
   }

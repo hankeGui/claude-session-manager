@@ -6,8 +6,45 @@ import * as scanner from '../services/scanner';
 import { readSessionMessages } from '../services/session-reader';
 import { deleteSession, batchDelete } from '../services/session-cleaner';
 import { hasTmux } from '../services/tmux';
+import { askAi, getClient } from '../services/ai-client';
+import * as aiScanner from '../services/ai-scanner';
+
 
 const PREFS_FILE = path.join(__dirname, '..', '..', 'user-preferences.json');
+
+/**
+ * Read session context and generate a title via Anthropic API
+ */
+async function generateTitle(sessionId: string): Promise<string | null> {
+  const found = scanner.getSessionById(sessionId);
+  if (!found) return null;
+
+  // Fast path: use cached AI summary if available
+  const cached = aiScanner.getSummary(sessionId);
+  if (cached) {
+    const prompt = `Convert this session summary into a short title (under 50 chars, same language): "${cached}"\nOutput ONLY the title, nothing else.`;
+    const result = await askAi(prompt, { maxTokens: 60 });
+    if (result) return result.trim().replace(/^["']|["']$/g, '');
+  }
+
+  // Fallback: read JSONL context
+  const { session } = found;
+  const msgs = await readSessionMessages(session.dirName, sessionId, { limit: 10, offset: 0 });
+
+  if (msgs.messages.length === 0) return null;
+
+  const context = msgs.messages.map((m) => {
+    const role = m.type === 'user' ? 'User' : 'Assistant';
+    const text = m.content.slice(0, 200);
+    return `${role}: ${text}`;
+  }).join('\n');
+
+  const prompt = `Here is a conversation between a user and an AI assistant:\n---\n${context}\n---\nGenerate a short descriptive title (under 50 characters, in the same language as the conversation). Output ONLY the title text, nothing else.`;
+
+  const result = await askAi(prompt, { maxTokens: 100 });
+  if (!result) return null;
+  return result.trim().replace(/^["']|["']$/g, '');
+}
 
 function loadPrefs(): Record<string, any> {
   try { return JSON.parse(fs.readFileSync(PREFS_FILE, 'utf-8')); }
@@ -107,65 +144,65 @@ router.post('/batch-rename', (req: Request, res: Response) => {
 
   res.write(`data: ${JSON.stringify({ type: 'start', total, skipped: sessionIds.length - total })}\n\n`);
 
-  // Process sequentially to avoid overloading Claude
+  // Pause background AI scanner to avoid API overload
+  aiScanner.pause();
+
+  // Process sequentially
   let idx = 0;
-  function next() {
-    if (idx >= toRename.length) {
+  let cancelled = false;
+
+  async function next() {
+    if (idx >= toRename.length || cancelled) {
+      aiScanner.resume();
       res.write(`data: ${JSON.stringify({ type: 'complete', done, failed, skipped: sessionIds.length - total, total })}\n\n`);
       res.end();
       return;
     }
 
-    const { sessionId, project } = toRename[idx++];
-    const cwd = project.projectPath || process.env.HOME;
-    const prompt = 'Based on the conversation history in this session, generate a short descriptive title (under 50 characters, in the same language as the conversation). Output ONLY the title text, nothing else.';
-    const cmd = `claude -p "${prompt.replace(/"/g, '\\"')}" --resume ${sessionId} --no-session-persistence --bare < /dev/null`;
-
-    exec(cmd, { cwd, timeout: 30000 }, (err, stdout) => {
-      if (err || !stdout.trim()) {
-        failed++;
-        res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
-      } else {
-        const title = stdout.trim().replace(/^["']|["']$/g, '');
+    const { sessionId } = toRename[idx++];
+    try {
+      const title = await generateTitle(sessionId);
+      if (title) {
         scanner.setTitle(sessionId, title);
         done++;
         res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'done', title, done: done + failed, total })}\n\n`);
+      } else {
+        failed++;
+        res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
       }
-      next();
-    });
+    } catch {
+      failed++;
+      res.write(`data: ${JSON.stringify({ type: 'progress', sessionId, status: 'error', done: done + failed, total })}\n\n`);
+    }
+    next();
   }
 
   next();
 
-  // Clean up on client disconnect
-  req.on('close', () => {
-    idx = toRename.length; // stop processing
-  });
+  req.on('close', () => { cancelled = true; aiScanner.resume(); });
 });
 
-router.post('/:sessionId/auto-rename', (req: Request, res: Response) => {
+router.post('/:sessionId/auto-rename', async (req: Request, res: Response) => {
   const { sessionId } = req.params;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
     return res.status(404).json({ error: 'Session not found' });
   }
 
-  const { project } = found;
-  const cwd = project.projectPath || process.env.HOME;
-  const prompt = 'Based on the conversation history in this session, generate a short descriptive title (under 50 characters, in the same language as the conversation). Output ONLY the title text, nothing else.';
-  const cmd = `claude -p "${prompt.replace(/"/g, '\\"')}" --resume ${sessionId} --no-session-persistence --bare < /dev/null`;
+  if (!getClient()) {
+    return res.status(400).json({ error: 'AI not configured', needsConfig: true });
+  }
 
-  exec(cmd, { cwd, timeout: 30000 }, (err, stdout, stderr) => {
-    if (err) {
-      return res.status(500).json({ error: 'Claude command failed', detail: stderr || err.message });
-    }
-    const title = stdout.trim().replace(/^["']|["']$/g, '');
+  try {
+    const title = await generateTitle(sessionId);
     if (!title) {
-      return res.status(500).json({ error: 'Claude returned empty title' });
+      return res.status(500).json({ error: 'AI returned empty title' });
     }
     scanner.setTitle(sessionId, title);
     res.json({ success: true, sessionId, title });
-  });
+  } catch (err: any) {
+    res.status(500).json({ error: 'AI rename failed', detail: err.message });
+  }
 });
 
 router.put('/:sessionId/title', (req: Request, res: Response) => {
