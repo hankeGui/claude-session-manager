@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, Message, Session } from '../api';
+import { useStore } from '../store';
+import { showToast } from './Toast';
+import ResumeDialog from './ResumeDialog';
 import MessageView from './MessageView';
 
 interface Props {
@@ -23,6 +26,9 @@ export default function SessionModal({ session, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'user'>('all');
   const [projectInfo, setProjectInfo] = useState<{ displayName: string } | null>(null);
+  const [showResume, setShowResume] = useState(false);
+  const setFavorite = useStore((s) => s.setFavorite);
+  const setTitle = useStore((s) => s.setTitle);
 
   useEffect(() => {
     setLoading(true);
@@ -77,31 +83,62 @@ export default function SessionModal({ session, onClose }: Props) {
           <span>Modified: {formatDate(session.modified)}</span>
         </div>
 
-        {/* Toolbar */}
+        {/* Actions */}
         <div className="flex items-center gap-2 px-5 py-2 border-b border-border">
           <button
-            onClick={() => setFilter('all')}
-            className={`px-3 py-1 text-xs rounded-md border ${
-              filter === 'all'
-                ? 'bg-accent text-black border-accent'
-                : 'border-border text-text-primary hover:bg-border'
-            }`}
+            onClick={() => setFavorite(session.sessionId, !session.isFavorite)}
+            className={`px-2 py-1 text-sm leading-none rounded border border-border ${session.isFavorite ? 'text-yellow-400' : 'text-text-muted hover:text-yellow-400/60'}`}
+            title={session.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
           >
-            All
+            {session.isFavorite ? '\u2605' : '\u2606'}
           </button>
           <button
-            onClick={() => setFilter('user')}
-            className={`px-3 py-1 text-xs rounded-md border ${
-              filter === 'user'
-                ? 'bg-accent text-black border-accent'
-                : 'border-border text-text-primary hover:bg-border'
-            }`}
+            onClick={async () => {
+              const currentTitle = session.customTitle || session.summary || session.firstPrompt || '';
+              const newTitle = prompt('Rename session:', currentTitle);
+              if (newTitle !== null) {
+                try {
+                  await setTitle(session.sessionId, newTitle);
+                  showToast(newTitle ? 'Title updated' : 'Title removed', 'success');
+                } catch (err: any) { showToast(err.message, 'error'); }
+              }
+            }}
+            className="px-2.5 py-1 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-black"
           >
-            User Only
+            Rename
           </button>
-          <span className="ml-auto text-xs text-text-muted">
-            {filtered.length} messages
-          </span>
+          <button
+            onClick={() => setShowResume(true)}
+            className="px-2.5 py-1 text-xs border border-success text-success rounded hover:bg-success hover:text-black"
+          >
+            Resume
+          </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setFilter('all')}
+              className={`px-3 py-1 text-xs rounded-md border ${
+                filter === 'all'
+                  ? 'bg-accent text-black border-accent'
+                  : 'border-border text-text-primary hover:bg-border'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setFilter('user')}
+              className={`px-3 py-1 text-xs rounded-md border ${
+                filter === 'user'
+                  ? 'bg-accent text-black border-accent'
+                  : 'border-border text-text-primary hover:bg-border'
+              }`}
+            >
+              User Only
+            </button>
+            <span className="text-xs text-text-muted">
+              {filtered.length} msgs
+            </span>
+          </div>
         </div>
 
         {/* Messages */}
@@ -115,6 +152,8 @@ export default function SessionModal({ session, onClose }: Props) {
           )}
         </div>
       </div>
+
+      {showResume && <ResumeDialog session={session} onClose={() => setShowResume(false)} />}
     </div>
   );
 }

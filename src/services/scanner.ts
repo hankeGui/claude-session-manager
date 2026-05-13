@@ -34,38 +34,152 @@ function saveFavorites(favorites: Record<string, boolean>): void {
   fs.writeFileSync(FAVORITES_FILE, JSON.stringify(favorites, null, 2));
 }
 
-let tags: Record<string, string[]> = {};
+// --- Tag system ---
+// Storage format: { sessionId: { tags: string[], sources: string[] } }
+// sources tracks which extraction types have run (e.g. "meta", "refs", "search")
+
+interface TagEntry {
+  tags: string[];
+  sources: string[];
+}
+
+let tagStore: Record<string, TagEntry> = {};
 
 function loadTags(): void {
   try {
-    tags = JSON.parse(fs.readFileSync(TAGS_FILE, 'utf-8'));
+    const raw = JSON.parse(fs.readFileSync(TAGS_FILE, 'utf-8'));
+    // Migrate old format: { sessionId: string[] } → new format
+    tagStore = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (Array.isArray(value)) {
+        // Old format — migrate
+        tagStore[key] = { tags: value as string[], sources: ['meta'] };
+      } else if (value && typeof value === 'object') {
+        tagStore[key] = value as TagEntry;
+      }
+    }
   } catch {
-    tags = {};
+    tagStore = {};
   }
 }
 
 function saveTags(): void {
-  fs.writeFileSync(TAGS_FILE, JSON.stringify(tags, null, 2));
+  fs.writeFileSync(TAGS_FILE, JSON.stringify(tagStore, null, 2));
 }
 
 export function getTags(sessionId: string): string[] {
-  return tags[sessionId] || [];
+  return tagStore[sessionId]?.tags || [];
 }
 
-export function addTag(sessionId: string, tag: string): void {
-  if (!tags[sessionId]) tags[sessionId] = [];
+/** Check if a specific extraction source has already run for this session */
+export function hasTagSource(sessionId: string, source: string): boolean {
+  return tagStore[sessionId]?.sources?.includes(source) || false;
+}
+
+/** Mark an extraction source as done for this session */
+export function markTagSource(sessionId: string, source: string): void {
+  if (!tagStore[sessionId]) tagStore[sessionId] = { tags: [], sources: [] };
+  if (!tagStore[sessionId].sources.includes(source)) {
+    tagStore[sessionId].sources.push(source);
+  }
+}
+
+const IGNORE_TAGS = new Set(['head', 'master', 'main', 'users', 'home', 'tmp', 'var', 'opt', 'usr']);
+
+function isUsefulTag(tag: string): boolean {
+  if (!tag || tag.length < 2) return false;
+  const lower = tag.toLowerCase();
+  if (IGNORE_TAGS.has(lower)) return false;
+  if (/^[A-Z]\d+$/i.test(tag)) return false;
+  return true;
+}
+
+/**
+ * Add a single tag. Does NOT save to disk — call flushTags() after batch ops.
+ */
+function addTagInternal(sessionId: string, tag: string): boolean {
   const normalized = tag.trim();
-  if (!normalized || tags[sessionId].includes(normalized)) return;
-  tags[sessionId].push(normalized);
-  saveTags();
+  if (!normalized) return false;
+  if (!tagStore[sessionId]) tagStore[sessionId] = { tags: [], sources: [] };
+  if (tagStore[sessionId].tags.includes(normalized)) return false;
+  tagStore[sessionId].tags.push(normalized);
+  return true;
+}
+
+/**
+ * Add tag(s) for a session + mark source + persist. Public API for external callers.
+ */
+export function addTag(sessionId: string, tag: string): void {
+  if (addTagInternal(sessionId, tag)) {
+    saveTags();
+    syncSessionTags(sessionId);
+  }
+}
+
+export function addTags(sessionId: string, newTags: string[], source?: string): void {
+  let changed = false;
+  for (const t of newTags) {
+    if (addTagInternal(sessionId, t)) changed = true;
+  }
+  if (source) markTagSource(sessionId, source);
+  if (changed || source) {
+    saveTags();
+    syncSessionTags(sessionId);
+  }
+}
+
+/** Sync in-memory session object's tags field */
+function syncSessionTags(sessionId: string): void {
   for (const project of data.projects) {
     const session = project.sessions.find(s => s.sessionId === sessionId);
     if (session) {
-      session.tags = tags[sessionId];
+      session.tags = tagStore[sessionId]?.tags || [];
       break;
     }
   }
 }
+
+/**
+ * Extract meta tags (project path + git branch) for all sessions.
+ * Runs at scan time, skips sessions where "meta" source is already done.
+ */
+function extractMetaTags(): void {
+  let changed = false;
+  for (const project of data.projects) {
+    for (const session of project.sessions) {
+      if (session.isEmpty) continue;
+      if (hasTagSource(session.sessionId, 'meta')) continue;
+
+      const projectPath = project.projectPath || '';
+      if (projectPath) {
+        const lastSegment = projectPath.split('/').filter(Boolean).pop();
+        if (lastSegment && isUsefulTag(lastSegment)) {
+          if (addTagInternal(session.sessionId, lastSegment)) changed = true;
+        }
+      }
+
+      if (session.gitBranch && isUsefulTag(session.gitBranch)) {
+        if (addTagInternal(session.sessionId, session.gitBranch)) changed = true;
+      }
+
+      markTagSource(session.sessionId, 'meta');
+      session.tags = tagStore[session.sessionId]?.tags || [];
+      changed = true; // at minimum we marked the source
+    }
+  }
+  if (changed) saveTags();
+}
+
+/** Remove all tag data for a session */
+export function removeTags(sessionId: string): void {
+  if (tagStore[sessionId]) {
+    delete tagStore[sessionId];
+    saveTags();
+  }
+}
+
+/** Flush pending tag writes (for batch callers that use addTagInternal) */
+export function flushTags(): void { saveTags(); }
 
 export function setTitle(sessionId: string, title: string): void {
   const titles = loadTitles();
@@ -307,7 +421,7 @@ export async function scan(): Promise<void> {
           diskSize,
           dirName,
           isFavorite: !!favorites[sessionId],
-          tags: tags[sessionId] || [],
+          tags: getTags(sessionId),
         });
       } else {
         const meta = extractMetaFromJsonl(jsonlPath);
@@ -326,7 +440,7 @@ export async function scan(): Promise<void> {
           diskSize,
           dirName,
           isFavorite: !!favorites[sessionId],
-          tags: tags[sessionId] || [],
+          tags: getTags(sessionId),
         });
       }
 
@@ -348,7 +462,7 @@ export async function scan(): Promise<void> {
         diskSize: 0,
         dirName,
         isFavorite: !!favorites[sessionId],
-        tags: tags[sessionId] || [],
+        tags: getTags(sessionId),
       });
     }
 
@@ -369,6 +483,9 @@ export async function scan(): Promise<void> {
 
   projects.sort((a, b) => a.displayName.localeCompare(b.displayName));
   data = { projects };
+
+  // Extract meta tags (path + branch) for sessions not yet processed
+  extractMetaTags();
 }
 
 export function getData(): ScannerData {
@@ -397,7 +514,7 @@ export function removeSession(sessionId: string): boolean {
       if (titles[sessionId]) { delete titles[sessionId]; saveTitles(titles); }
       const favorites = loadFavorites();
       if (favorites[sessionId]) { delete favorites[sessionId]; saveFavorites(favorites); }
-      if (tags[sessionId]) { delete tags[sessionId]; saveTags(); }
+      removeTags(sessionId);
       removeSummary(sessionId);
       return true;
     }

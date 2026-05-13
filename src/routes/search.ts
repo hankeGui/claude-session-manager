@@ -26,13 +26,14 @@ function fuzzyMatch(query: string, target: string): number {
 }
 
 function matchSession(session: Session, q: string, mode: string): number {
+  const tags = session.tags || [];
   const fields = [
     session.customTitle || '',
     session.summary || '',
     session.firstPrompt || '',
     session.gitBranch || '',
     session.sessionId,
-    ...(session.tags || []),
+    ...tags,
   ];
 
   if (mode === 'regex') {
@@ -44,8 +45,16 @@ function matchSession(session: Session, q: string, mode: string): number {
     }
   }
 
-  // Default: case-insensitive includes, fallback to fuzzy
   const query = q.toLowerCase();
+
+  // Boost: if query looks like a number or ticket, check tags with PR# prefix
+  if (/^\d+$/.test(q)) {
+    if (tags.some(t => t === `PR#${q}`)) return 200;
+  }
+  // Boost: exact tag match (e.g. "DC00-6266")
+  if (tags.some(t => t.toLowerCase() === query)) return 200;
+
+  // Default: case-insensitive includes, fallback to fuzzy
   if (fields.some(f => f.toLowerCase().includes(query))) return 100;
 
   // Fuzzy fallback
@@ -196,7 +205,7 @@ Output format: ["id1", "id2", ...]`;
 
     // Auto-tag matched sessions with the search query
     for (const id of matchedIds) {
-      scanner.addTag(id, q);
+      scanner.addTags(id, [q], 'search');
     }
 
     res.json({ results, total: results.length, aiMatched: matchedIds.length });

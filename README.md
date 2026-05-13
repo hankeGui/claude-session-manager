@@ -8,16 +8,19 @@ As you work with Claude Code across many projects, sessions accumulate quickly a
 
 - **Browse all sessions** grouped by project, with message count, branch, dates, and disk size
 - **Favorites** — star sessions, dedicated Favorites folder in sidebar, persistent across restarts
-- **Search** — fuzzy matching, regex mode, relevance scoring across titles, prompts, branches
-- **AI Deep Search** — when local search finds nothing, use Claude to semantically match sessions
+- **Search** — fuzzy matching, regex mode, relevance scoring across titles, prompts, branches, tags
+- **AI Deep Search** — semantic search via Anthropic API, auto-tags matched sessions for instant future lookup
+- **Auto-tagging** — sessions are auto-tagged with project name, git branch, PR numbers, and Jira tickets
 - **Sort** by modified time, created time, message count, or context size
 - **View session messages** — read conversation history with clean formatting (system tags stripped)
 - **Resume sessions** — editable command dialog, terminal selector (iTerm2/Terminal.app), skip-permissions option
+- **AI Rename** — single or batch rename with streaming progress indicator
+- **Background AI scan** — incrementally generates summaries and extracts metadata on startup
 - **Scheduler** — cron tasks with AI natural language parsing, tmux session management, live output
-- **Delete sessions** — single or batch delete with confirmation, cleans up all related files
-- **Rename sessions** — manual or AI-powered auto-rename with background progress indicator
+- **Delete sessions** — single or batch delete with confirmation, cleans up all related metadata
 - **Empty detection** — flags cleared/abandoned sessions (//clear, //exit, Goodbye, no conversation)
 - **Auto port detection** — finds a free port automatically if default 3000 is in use
+- **Instance deduplication** — prevents multiple server instances from running simultaneously
 - **Dark theme** — easy on the eyes
 
 ## Quick Start
@@ -81,49 +84,70 @@ No database required. All data stays local.
 
 ```
 claude-session-mgr/
-├── bin/cli.js              # CLI entry point (auto port, browser open)
-├── server.ts               # Express server (API + static serving)
+├── bin/cli.js              # CLI entry (port detect, instance dedup, browser open)
+├── server.ts               # Express server (API + static + AI scan boot)
+├── CLAUDE.md               # Development guide and architecture docs
 ├── src/
 │   ├── routes/             # API route handlers
 │   │   ├── projects.ts     # Project listing and session fetching
-│   │   ├── sessions.ts     # Messages, delete, rename, resume
-│   │   └── search.ts       # Local search and AI deep search
+│   │   ├── sessions.ts     # Messages, delete, rename, resume, batch rename (SSE)
+│   │   ├── search.ts       # Fuzzy/regex search + AI deep search
+│   │   ├── scheduler.ts    # Cron task management
+│   │   └── settings.ts     # AI config and preferences
 │   ├── services/           # Business logic
-│   │   ├── scanner.ts      # Session indexing and metadata
+│   │   ├── scanner.ts      # Session indexing, metadata, tag system
 │   │   ├── session-reader.ts   # JSONL message parsing
-│   │   └── session-cleaner.ts  # Session deletion
+│   │   ├── session-cleaner.ts  # Session deletion + cleanup
+│   │   ├── ai-scanner.ts   # Background AI summary + ref tag extraction
+│   │   ├── ai-client.ts    # Anthropic SDK wrapper (askAi)
+│   │   ├── scheduler.ts    # node-cron task engine
+│   │   └── tmux.ts         # tmux session management
 │   ├── utils/paths.ts      # Path constants and helpers
 │   └── types.ts            # Shared TypeScript interfaces
-├── client/                 # React frontend source (dev only)
+├── client/                 # React frontend source
 │   ├── src/
-│   │   ├── components/     # React components
+│   │   ├── components/     # React components (18 files)
 │   │   ├── store/          # Zustand state management
 │   │   ├── api/            # API client
 │   │   └── utils/          # Content cleaning utilities
 │   └── vite.config.ts      # Builds to ../dist/
 ├── dist/                   # Built frontend (served in production)
-├── tests/                  # Backend tests
-└── vitest.config.ts        # Backend test configuration
+├── tests/                  # Backend tests (Vitest + supertest)
+└── .github/workflows/      # CI/CD (npm publish on release)
 ```
+
+## AI Configuration
+
+AI features (deep search, auto-rename, background scan) use the Anthropic SDK directly. Configuration priority:
+
+1. Environment variables: `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
+2. `~/.claude/settings.json` → `env` section
+3. `user-preferences.json` → `ai` section (editable via Settings UI)
+
+At least one auth method (API key or auth token) is required for AI features. Without it, they gracefully degrade — all non-AI features work normally.
 
 ## API Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/stats` | Dashboard overview |
+| GET | `/api/stats` | Dashboard overview (counts, dates) |
 | GET | `/api/projects` | List all projects with session counts |
 | GET | `/api/projects/:dirName/sessions` | List sessions for a project |
-| GET | `/api/sessions/:sessionId/messages` | View session messages |
+| GET | `/api/sessions/:sessionId/messages` | View session messages (paginated) |
 | GET | `/api/search?q=&project=&empty=&mode=&favorite=` | Search sessions (fuzzy/regex) |
-| POST | `/api/search/deep` | AI-powered semantic search |
+| POST | `/api/search/deep` | AI semantic search (auto-tags results) |
 | DELETE | `/api/sessions/:sessionId` | Delete a session |
 | POST | `/api/sessions/batch-delete` | Batch delete sessions |
 | PUT | `/api/sessions/:sessionId/title` | Set custom title |
 | PUT | `/api/sessions/:sessionId/favorite` | Toggle favorite |
-| POST | `/api/sessions/:sessionId/auto-rename` | AI auto-rename |
+| POST | `/api/sessions/:sessionId/auto-rename` | AI auto-rename single session |
+| POST | `/api/sessions/batch-rename` | Batch AI rename (SSE stream) |
 | POST | `/api/sessions/:sessionId/resume` | Open terminal and resume |
 | GET | `/api/sessions/preferences` | Get terminal preferences |
 | PUT | `/api/sessions/preferences` | Set terminal preferences |
+| GET | `/api/settings/ai` | Get AI configuration status |
+| PUT | `/api/settings/ai` | Update AI configuration |
+| GET | `/api/ai-scan/status` | Background scan progress |
 | GET | `/api/scheduler/tasks` | List scheduled tasks |
 | POST | `/api/scheduler/tasks` | Create a scheduled task |
 | DELETE | `/api/scheduler/tasks/:id` | Delete a task |
@@ -142,7 +166,7 @@ npm version patch   # or minor / major
 # 2. Push commit and tag
 git push && git push --tags
 
-# 3. Create a GitHub Release (triggers CI)
+# 3. Create a GitHub Release (triggers CI → npm publish)
 gh release create v<version> --title "v<version>" --generate-notes
 ```
 
@@ -167,15 +191,16 @@ npm publish --access public
 - **Frontend**: React 18 + TypeScript + Tailwind CSS (Vite 5)
 - **State Management**: Zustand
 - **Backend**: TypeScript + Express (runs via [tsx](https://github.com/privatenumber/tsx), no compile step)
+- **AI**: Anthropic SDK (`@anthropic-ai/sdk`) — direct API calls, no CLI subprocess
 - **Testing**: Vitest + supertest + @testing-library/react
-- **AI features**: Claude Code CLI (`claude -p`) for auto-rename and deep search
 - **CI/CD**: GitHub Actions for automated npm publishing on release
 
 ## Requirements
 
 - Node.js 18+
-- Claude Code CLI installed and configured (for AI features)
 - macOS (terminal integration uses AppleScript for iTerm2/Terminal.app)
+- Claude Code CLI installed (for session data in `~/.claude/projects/`)
+- Anthropic API key or auth token (optional, for AI features)
 - tmux (optional, for scheduler terminal session management)
 
 ## License

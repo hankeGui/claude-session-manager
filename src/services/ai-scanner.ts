@@ -50,15 +50,56 @@ async function waitWhilePaused(): Promise<void> {
   while (paused) await delay(200);
 }
 
-/**
- * Pause scanning (e.g. when user triggers batch rename)
- */
 export function pause(): void { paused = true; }
+export function resume(): void { paused = false; }
+
+// --- Ref tag extraction (PR numbers, Jira tickets) ---
+const PR_RE = /\/pull\/(\d+)/g;
+const JIRA_RE = /\/browse\/([A-Z][A-Z0-9]+-\d+)/g;
+
+function extractRefTags(text: string): string[] {
+  const found = new Set<string>();
+  let m: RegExpExecArray | null;
+  PR_RE.lastIndex = 0;
+  JIRA_RE.lastIndex = 0;
+  while ((m = PR_RE.exec(text)) !== null) found.add(`PR#${m[1]}`);
+  while ((m = JIRA_RE.exec(text)) !== null) found.add(m[1]);
+  return [...found];
+}
 
 /**
- * Resume scanning after pause
+ * Extract ref tags (PR/Jira) from session messages.
+ * Uses scanner.hasTagSource('refs') to skip already-processed sessions.
  */
-export function resume(): void { paused = false; }
+async function extractAllRefTags(data: ReturnType<typeof scanner.getData>): Promise<void> {
+  const toScan: { sessionId: string; dirName: string }[] = [];
+  for (const project of data.projects) {
+    for (const session of project.sessions) {
+      if (session.isEmpty) continue;
+      if (scanner.hasTagSource(session.sessionId, 'refs')) continue;
+      toScan.push({ sessionId: session.sessionId, dirName: session.dirName });
+    }
+  }
+  if (toScan.length === 0) return;
+
+  let extracted = 0;
+  for (const item of toScan) {
+    try {
+      const msgs = await readSessionMessages(item.dirName, item.sessionId, { limit: 5, offset: 0 });
+      const fullText = msgs.messages.map((m) => m.content.slice(0, 500)).join('\n');
+      const refTags = extractRefTags(fullText);
+      scanner.addTags(item.sessionId, refTags, 'refs');
+      extracted += refTags.length;
+    } catch {
+      // Mark as scanned even on error to avoid retrying broken files
+      scanner.markTagSource(item.sessionId, 'refs');
+      scanner.flushTags();
+    }
+  }
+  if (extracted > 0) {
+    console.log(`Ref tags: extracted ${extracted} from ${toScan.length} sessions`);
+  }
+}
 
 async function processOne(item: { sessionId: string; dirName: string }): Promise<void> {
   try {
@@ -66,6 +107,13 @@ async function processOne(item: { sessionId: string; dirName: string }): Promise
     if (msgs.messages.length === 0) {
       status.done++;
       return;
+    }
+
+    // Extract PR/Jira ref tags if not already done
+    if (!scanner.hasTagSource(item.sessionId, 'refs')) {
+      const fullText = msgs.messages.map((m) => m.content.slice(0, 500)).join('\n');
+      const refTags = extractRefTags(fullText);
+      scanner.addTags(item.sessionId, refTags, 'refs');
     }
 
     const context = msgs.messages.map((m) => {
@@ -89,22 +137,26 @@ async function processOne(item: { sessionId: string; dirName: string }): Promise
 
 /**
  * Background AI scan: generate summaries for sessions not yet cached.
- * Fire-and-forget — does not block server startup.
+ * Also extracts ref tags (PR/Jira) as a fast pre-pass.
  */
 export async function start(): Promise<void> {
   loadSummaries();
+
+  const data = scanner.getData();
+
+  // Fast pre-pass: extract PR/Jira ref tags (pure I/O, no AI)
+  await extractAllRefTags(data);
 
   if (!getClient()) {
     console.log('AI scan skipped: AI not configured');
     return;
   }
 
-  const data = scanner.getData();
   const queue: { sessionId: string; dirName: string }[] = [];
 
   for (const project of data.projects) {
     for (const session of project.sessions) {
-      if (summaries[session.sessionId]) continue; // already cached
+      if (summaries[session.sessionId]?.summary) continue;
       if (session.isEmpty) continue;
       if (session.messageCount <= 1) continue;
       queue.push({ sessionId: session.sessionId, dirName: session.dirName });
@@ -123,7 +175,6 @@ export async function start(): Promise<void> {
   status.running = true;
   console.log(`AI scan started: ${queue.length} sessions to process (${status.cached} cached)`);
 
-  // Process in batches of 3 concurrently, 100ms between batches
   const CONCURRENCY = 3;
   for (let i = 0; i < queue.length; i += CONCURRENCY) {
     if (!status.running) break;
@@ -143,9 +194,6 @@ export async function start(): Promise<void> {
   console.log(`AI scan complete: ${status.done} processed, ${status.cached} total cached`);
 }
 
-/**
- * Stop background scan (e.g. on server shutdown)
- */
 export function stop(): void {
   status.running = false;
 }
