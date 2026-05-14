@@ -14,7 +14,25 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PKG_VERSION = require('./package.json').version;
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// Simple rate limiter for expensive endpoints (no external deps)
+function rateLimit(windowMs: number, maxRequests: number) {
+  const hits = new Map<string, number[]>();
+  return (req: any, res: any, next: any) => {
+    const key = req.ip || 'local';
+    const now = Date.now();
+    const timestamps = (hits.get(key) || []).filter(t => now - t < windowMs);
+    if (timestamps.length >= maxRequests) {
+      return res.status(429).json({ error: 'Too many requests, please try again later' });
+    }
+    timestamps.push(now);
+    hits.set(key, timestamps);
+    next();
+  };
+}
+
+const aiRateLimit = rateLimit(60000, 5); // 5 req/min for AI-heavy endpoints
 
 const staticDir = path.join(__dirname, 'dist');
 if (fs.existsSync(staticDir)) {
@@ -58,12 +76,12 @@ app.post('/api/rescan', async (_req, res) => {
   });
 });
 
-app.post('/api/ai-scan/start', (_req, res) => {
+app.post('/api/ai-scan/start', aiRateLimit, (_req, res) => {
   aiScanner.start();
   res.json({ success: true });
 });
 
-app.post('/api/rescan/force', async (_req, res) => {
+app.post('/api/rescan/force', aiRateLimit, async (_req, res) => {
   scanner.clearTitles();
   scanner.clearTags();
   aiScanner.clearSummaries();
@@ -73,7 +91,7 @@ app.post('/api/rescan/force', async (_req, res) => {
   res.json({ success: true, pending });
 });
 
-app.post('/api/clear-cache', (_req, res) => {
+app.post('/api/clear-cache', aiRateLimit, (_req, res) => {
   scanner.clearTitles();
   scanner.clearTags();
   aiScanner.clearSummaries();

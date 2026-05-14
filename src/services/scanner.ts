@@ -10,6 +10,13 @@ const TITLES_FILE = path.join(__dirname, '..', '..', 'session-titles.json');
 const FAVORITES_FILE = path.join(__dirname, '..', '..', 'session-favorites.json');
 const TAGS_FILE = path.join(__dirname, '..', '..', 'session-tags.json');
 
+/** Atomic write: write to temp file then rename to prevent partial writes */
+function atomicWriteSync(filePath: string, data: string): void {
+  const tmp = filePath + '.tmp';
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, filePath);
+}
+
 function loadTitles(): Record<string, string> {
   try {
     return JSON.parse(fs.readFileSync(TITLES_FILE, 'utf-8'));
@@ -19,7 +26,7 @@ function loadTitles(): Record<string, string> {
 }
 
 function saveTitles(titles: Record<string, string>): void {
-  fs.writeFileSync(TITLES_FILE, JSON.stringify(titles, null, 2));
+  atomicWriteSync(TITLES_FILE, JSON.stringify(titles, null, 2));
 }
 
 function loadFavorites(): Record<string, boolean> {
@@ -31,7 +38,7 @@ function loadFavorites(): Record<string, boolean> {
 }
 
 function saveFavorites(favorites: Record<string, boolean>): void {
-  fs.writeFileSync(FAVORITES_FILE, JSON.stringify(favorites, null, 2));
+  atomicWriteSync(FAVORITES_FILE, JSON.stringify(favorites, null, 2));
 }
 
 // --- Tag system ---
@@ -65,7 +72,7 @@ function loadTags(): void {
 }
 
 function saveTags(): void {
-  fs.writeFileSync(TAGS_FILE, JSON.stringify(tagStore, null, 2));
+  atomicWriteSync(TAGS_FILE, JSON.stringify(tagStore, null, 2));
 }
 
 export function getTags(sessionId: string): string[] {

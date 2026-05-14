@@ -32,7 +32,9 @@ function loadSummaries(): void {
 }
 
 function saveSummaries(): void {
-  fs.writeFileSync(SUMMARIES_FILE, JSON.stringify(summaries, null, 2));
+  const tmp = SUMMARIES_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(summaries, null, 2));
+  fs.renameSync(tmp, SUMMARIES_FILE);
 }
 
 export function getSummary(sessionId: string): string | null {

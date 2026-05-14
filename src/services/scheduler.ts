@@ -29,18 +29,28 @@ function save() {
 
 const SYSTEM_SUFFIX = `IMPORTANT: You are running as an automated scheduled task with NO human in the loop. Never ask the user questions or wait for input. Make all decisions autonomously. If information is missing, use your best judgment or skip that step. Complete the task fully without any interaction.`;
 
+/** Validate working directory: must be absolute, no traversal, and exist */
+function isValidWorkingDir(dir: string): boolean {
+  if (!path.isAbsolute(dir)) return false;
+  const normalized = path.normalize(dir);
+  if (normalized !== dir && normalized !== dir + '/') return false; // reject ../.. tricks
+  return fs.existsSync(normalized);
+}
+
 function buildArgs(task: ScheduledTask): string[] {
   const args: string[] = ['-p', task.prompt, '--append-system-prompt', SYSTEM_SUFFIX];
   if (task.skipPermissions) args.push('--dangerously-skip-permissions');
   if (task.model) args.push('--model', task.model);
-  if (task.workingDirectory) args.push('--add-dir', task.workingDirectory);
+  if (task.workingDirectory && isValidWorkingDir(task.workingDirectory)) {
+    args.push('--add-dir', task.workingDirectory);
+  }
   return args;
 }
 
 function executeInTerminal(task: ScheduledTask) {
   const args = buildArgs(task);
   const cmd = `claude ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`;
-  const cwd = task.workingDirectory && fs.existsSync(task.workingDirectory)
+  const cwd = task.workingDirectory && isValidWorkingDir(task.workingDirectory)
     ? task.workingDirectory
     : process.cwd();
 
@@ -154,7 +164,7 @@ function executeTask(taskId: string) {
 
   const args = buildArgs(task);
   const opts: any = { stdio: ['pipe', 'pipe', 'pipe'] };
-  if (task.workingDirectory && fs.existsSync(task.workingDirectory)) {
+  if (task.workingDirectory && isValidWorkingDir(task.workingDirectory)) {
     opts.cwd = task.workingDirectory;
   }
 

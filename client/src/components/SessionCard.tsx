@@ -5,6 +5,10 @@ import { confirm } from './ConfirmDialog';
 import { showToast } from './Toast';
 import ResumeDialog from './ResumeDialog';
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 interface Props {
   session: Session;
   onView: (session: Session) => void;
@@ -75,7 +79,7 @@ export default function SessionCard({ session, onView }: Props) {
       title: 'Rename Session',
       message: `<div>
         <div style="display:flex;gap:8px;align-items:center">
-          <input id="rename-input" type="text" value="${currentTitle.replace(/"/g, '&quot;')}"
+          <input id="rename-input" type="text" value="${escapeHtml(currentTitle)}"
             placeholder="Enter new title..."
             style="flex:1;padding:8px 12px;border:1px solid #2a3a5e;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:14px;" />
           <button id="ai-gen-btn" type="button"

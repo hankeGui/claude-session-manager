@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { exec, execSync } from 'child_process';
+import { exec, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import * as scanner from '../services/scanner';
@@ -262,15 +262,15 @@ router.post('/:sessionId/resume', (req: Request, res: Response) => {
     if (!hasTmux()) {
       return res.status(400).json({ error: 'tmux is not installed' });
     }
-    const name = `resume-${sessionId.slice(0, 8)}`;
+    const name = `resume-${sessionId.slice(0, 8).replace(/[^a-zA-Z0-9_-]/g, '')}`;
     let alreadyRunning = false;
-    try {
-      execSync(`tmux has-session -t ${name}`, { stdio: 'ignore' });
+    const hasSession = spawnSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' });
+    if (hasSession.status === 0) {
       alreadyRunning = true;
-    } catch {
+    } else {
       // Create new tmux session in background
-      execSync(`tmux new-session -d -s ${name} -c '${(cwd as string).replace(/'/g, "'\\''")}'`, { stdio: 'ignore' });
-      execSync(`tmux send-keys -t ${name} '${claudeCmd.replace(/'/g, "'\\''")}; exit' Enter`, { stdio: 'ignore' });
+      spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd as string], { stdio: 'ignore' });
+      spawnSync('tmux', ['send-keys', '-t', name, `${claudeCmd}; exit`, 'Enter'], { stdio: 'ignore' });
     }
 
     // Open a terminal window to attach
