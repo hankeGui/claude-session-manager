@@ -2,13 +2,9 @@ import { useEffect, useState } from 'react';
 import { api, Message, Session } from '../api';
 import { useStore } from '../store';
 import { showToast } from './Toast';
-import { confirm } from './ConfirmDialog';
 import ResumeDialog from './ResumeDialog';
+import RenameDialog from './RenameDialog';
 import MessageView from './MessageView';
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 interface Props {
   session: Session;
@@ -35,7 +31,9 @@ export default function SessionModal({ session, onClose }: Props) {
   const [projectInfo, setProjectInfo] = useState<{ displayName: string } | null>(null);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
-  const setFavorite = useStore((s) => s.setFavorite);
+  const [showRename, setShowRename] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(session.isFavorite);
+  const storeFavorite = useStore((s) => s.setFavorite);
   const setTitle = useStore((s) => s.setTitle);
 
   useEffect(() => {
@@ -134,58 +132,14 @@ export default function SessionModal({ session, onClose }: Props) {
         {/* Actions */}
         <div className="flex items-center gap-2 px-5 py-2 border-b border-border">
           <button
-            onClick={() => setFavorite(session.sessionId, !session.isFavorite)}
-            className={`px-2 py-1 text-sm leading-none rounded border border-border ${session.isFavorite ? 'text-yellow-400' : 'text-text-muted hover:text-yellow-400/60'}`}
-            title={session.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            onClick={() => { const next = !isFavorite; setIsFavorite(next); storeFavorite(session.sessionId, next); }}
+            className={`px-2 py-1 text-sm leading-none rounded border border-border ${isFavorite ? 'text-yellow-400' : 'text-text-muted hover:text-yellow-400/60'}`}
+            title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
           >
-            {session.isFavorite ? '\u2605' : '\u2606'}
+            {isFavorite ? '\u2605' : '\u2606'}
           </button>
           <button
-            onClick={async () => {
-              const currentTitle = session.customTitle || session.summary || session.firstPrompt || '';
-              const { confirmed } = await confirm({
-                title: 'Rename Session',
-                message: `<div>
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <input id="rename-input" type="text" value="${escapeHtml(currentTitle)}"
-                      placeholder="Enter new title..."
-                      style="flex:1;padding:8px 12px;border:1px solid #2a3a5e;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:14px;" />
-                    <button id="ai-gen-btn" type="button"
-                      style="padding:6px 12px;border:1px solid #ffa726;border-radius:6px;background:transparent;color:#ffa726;font-size:12px;cursor:pointer;white-space:nowrap">
-                      AI Generate
-                    </button>
-                  </div>
-                </div>`,
-                html: true,
-                okText: 'Save',
-                okClass: 'success',
-                onMount: (close) => {
-                  const btn = document.getElementById('ai-gen-btn');
-                  if (btn) {
-                    btn.onclick = (ev) => {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      const { aiTask } = useStore.getState();
-                      if (aiTask && aiTask.status === 'running') {
-                        showToast('AI task already running, please wait', 'error');
-                        return;
-                      }
-                      useStore.getState().startAiRename(session.sessionId, currentTitle);
-                      close();
-                    };
-                  }
-                },
-              });
-              if (!confirmed) return;
-              const input = document.getElementById('rename-input') as HTMLInputElement;
-              const newTitle = input?.value ?? '';
-              try {
-                await setTitle(session.sessionId, newTitle);
-                showToast(newTitle ? 'Title updated' : 'Title removed', 'success');
-              } catch (err: any) {
-                showToast(err.message, 'error');
-              }
-            }}
+            onClick={() => setShowRename(true)}
             className="px-2.5 py-1 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-black"
           >
             Rename
@@ -248,6 +202,22 @@ export default function SessionModal({ session, onClose }: Props) {
       </div>
 
       {showResume && <ResumeDialog session={session} onClose={() => setShowResume(false)} />}
+      {showRename && (
+        <RenameDialog
+          sessionId={session.sessionId}
+          currentTitle={session.customTitle || session.summary || session.firstPrompt || ''}
+          onClose={() => setShowRename(false)}
+          onSave={async (newTitle) => {
+            setShowRename(false);
+            try {
+              await setTitle(session.sessionId, newTitle);
+              showToast(newTitle ? 'Title updated' : 'Title removed', 'success');
+            } catch (err: any) {
+              showToast(err.message, 'error');
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

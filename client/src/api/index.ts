@@ -67,7 +67,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   getStats: () => request<Stats>('/api/stats'),
 
-  getAiScanStatus: () => request<{ running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; cached: number; result: { summaries: number; titles: number; skipped: number } | null }>('/api/ai-scan/status'),
+  getAiScanStatus: () => request<{ running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; cached: number; error: string | null; configValid: boolean | null; result: { summaries: number; titles: number; skipped: number } | null }>('/api/ai-scan/status'),
 
   startAiScan: () => request<{ success: boolean }>('/api/ai-scan/start', { method: 'POST' }),
   pauseAiScan: () => request<{ success: boolean }>('/api/ai-scan/pause', { method: 'POST' }),
@@ -177,5 +177,18 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prefs),
+    }),
+
+  getAiSettings: () =>
+    request<{ isConfigured: boolean; baseUrl?: string; apiKey?: string; authToken?: string; qualityModel?: string; fastModel?: string }>('/api/settings/ai'),
+
+  verifyAiConnection: () =>
+    request<{ ok: boolean; error?: string }>('/api/settings/ai/verify'),
+
+  saveAiSettings: (data: { baseUrl: string; apiKey: string; authToken: string; qualityModel: string; fastModel: string }) =>
+    request<{ success: boolean; verified: boolean; error?: string }>('/api/settings/ai', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
     }),
 };

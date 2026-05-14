@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore, AppView } from '../store';
 import { api, UpdateInfo } from '../api';
 import { confirm } from './ConfirmDialog';
 import { showToast } from './Toast';
+import AiConfigDialog from './AiConfigDialog';
 
 const tabs: { id: AppView; label: string }[] = [
   { id: 'sessions', label: 'Sessions' },
@@ -24,13 +25,42 @@ if (typeof window !== 'undefined') {
 export default function Header() {
   const stats = useStore((s) => s.stats);
   const refresh = useStore((s) => s.refresh);
+  const aiScanStatus = useStore((s) => s.aiScanStatus);
   const currentView = useStore((s) => s.currentView);
   const setView = useStore((s) => s.setView);
+  const setShowAiConfig = useStore((s) => s.setShowAiConfig);
   const [rescanState, setRescanState] = useState<'idle' | 'loading' | 'done'>('idle');
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'done' | 'error'>('idle');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [aiStatus, setAiStatus] = useState<'unknown' | 'ok' | 'configured' | 'none'>('unknown');
+
+  useEffect(() => {
+    // Use server-side configValid (set during boot verification) to avoid redundant API call
+    api.getAiScanStatus().then((s) => {
+      if (s.configValid === true) {
+        setAiStatus('ok');
+      } else if (s.configValid === false) {
+        // Config exists but failed verification, or not configured at all
+        api.getAiSettings().then((settings) => {
+          setAiStatus(settings.isConfigured ? 'configured' : 'none');
+        }).catch(() => setAiStatus('none'));
+      } else {
+        // Unknown — fall back to manual check
+        api.getAiSettings().then((settings) => {
+          if (!settings.isConfigured) { setAiStatus('none'); return; }
+          setAiStatus('configured');
+          api.verifyAiConnection().then((r) => setAiStatus(r.ok ? 'ok' : 'configured')).catch(() => {});
+        }).catch(() => setAiStatus('none'));
+      }
+    }).catch(() => setAiStatus('none'));
+  }, []);
 
   const handleRescan = async () => {
+    if (aiStatus === 'none') {
+      setShowAiConfig(true);
+      return;
+    }
+
     setRescanState('loading');
     const result = await refresh();
     setRescanState('idle');
@@ -140,12 +170,32 @@ export default function Header() {
         )}
         <button
           onClick={handleRescan}
-          disabled={rescanState === 'loading'}
+          disabled={rescanState === 'loading' || !!aiScanStatus?.running}
           className="px-3 py-1.5 border border-border rounded-md bg-bg-card text-text-primary text-xs hover:bg-border disabled:opacity-50"
         >
-          {rescanState === 'loading' ? 'Extracting...' : 'AI Re-Extract'}
+          {rescanState === 'loading' || aiScanStatus?.running ? 'Extracting...' : 'AI Re-Extract'}
+        </button>
+        <button
+          onClick={() => setShowAiConfig(true)}
+          className={`w-7 h-7 flex items-center justify-center rounded-md border border-border bg-bg-card hover:bg-border transition-colors ${
+            aiStatus === 'ok' ? 'text-green-400 hover:text-green-300' :
+            aiStatus === 'configured' ? 'text-amber-400 hover:text-amber-300' :
+            aiStatus === 'none' ? 'text-red-400 hover:text-red-300' :
+            'text-text-muted hover:text-text-primary'
+          }`}
+          title={
+            aiStatus === 'ok' ? 'AI Settings (connected)' :
+            aiStatus === 'configured' ? 'AI Settings (configured but not reachable)' :
+            aiStatus === 'none' ? 'AI Settings (not configured)' : 'AI Settings'
+          }
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
         </button>
       </div>
+      <AiConfigDialog onSaved={() => setAiStatus('ok')} />
     </header>
   );
 }

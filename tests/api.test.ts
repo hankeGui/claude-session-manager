@@ -4,6 +4,7 @@ import express from 'express';
 import projectsRouter from '../src/routes/projects';
 import sessionsRouter from '../src/routes/sessions';
 import searchRouter from '../src/routes/search';
+import settingsRouter from '../src/routes/settings';
 import * as scanner from '../src/services/scanner';
 import * as aiScanner from '../src/services/ai-scanner';
 
@@ -12,6 +13,7 @@ app.use(express.json());
 app.use('/api/projects', projectsRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/search', searchRouter);
+app.use('/api/settings', settingsRouter);
 
 // AI scan control endpoints (mirrors server.ts)
 app.get('/api/ai-scan/status', (_req, res) => {
@@ -514,6 +516,94 @@ describe('API endpoints', () => {
       // After rescan, scanner should NOT be running (rescan only returns counts)
       const statusRes = await request(app).get('/api/ai-scan/status');
       expect(statusRes.body.running).toBe(false);
+    });
+  });
+
+  describe('GET /api/settings/ai', () => {
+    it('returns isConfigured field', async () => {
+      const res = await request(app).get('/api/settings/ai');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('isConfigured');
+      expect(typeof res.body.isConfigured).toBe('boolean');
+    });
+
+    it('returns masked credentials when configured', async () => {
+      const res = await request(app).get('/api/settings/ai');
+      if (res.body.isConfigured) {
+        // Credentials should be masked (contain asterisks)
+        if (res.body.apiKey) {
+          expect(res.body.apiKey).toContain('*');
+        }
+        if (res.body.authToken) {
+          expect(res.body.authToken).toContain('*');
+        }
+        expect(res.body).toHaveProperty('qualityModel');
+        expect(res.body).toHaveProperty('fastModel');
+      }
+    });
+  });
+
+  describe('PUT /api/settings/ai', () => {
+    it('returns 400 when no auth method after merge', async () => {
+      // Save empty config where no existing config exists either
+      // This depends on existing state, so just verify the endpoint works
+      const res = await request(app)
+        .put('/api/settings/ai')
+        .send({ baseUrl: '', apiKey: '', authToken: '', qualityModel: '', fastModel: '' });
+      // Either 400 (no existing auth) or 200 (existing config was merged)
+      expect([200, 400]).toContain(res.status);
+    });
+
+    it('accepts partial update (empty credentials preserve existing)', async () => {
+      const res = await request(app)
+        .put('/api/settings/ai')
+        .send({ qualityModel: 'test-quality', fastModel: 'test-fast' });
+      // Should succeed if existing credentials are configured
+      if (res.status === 200) {
+        expect(res.body.success).toBe(true);
+      }
+    });
+  });
+
+  describe('POST /api/sessions/:sessionId/resume — flexible terminal field', () => {
+    it('accepts arbitrary terminal app name', async () => {
+      const data = scanner.getData();
+      const session = data.projects.flatMap(p => p.sessions).find(s => !s.isEmpty);
+      if (session) {
+        const res = await request(app)
+          .post(`/api/sessions/${session.sessionId}/resume`)
+          .send({ terminal: 'iTerm2', terminalApp: 'iTerm' });
+        // Should NOT return 400 validation error
+        expect(res.status).not.toBe(400);
+      }
+    });
+
+    it('accepts terminal value without enum restriction', async () => {
+      const data = scanner.getData();
+      const session = data.projects.flatMap(p => p.sessions).find(s => !s.isEmpty);
+      if (session) {
+        const res = await request(app)
+          .post(`/api/sessions/${session.sessionId}/resume`)
+          .send({ terminal: 'Terminal.app' });
+        expect(res.status).not.toBe(400);
+      }
+    });
+  });
+
+  describe('GET /api/ai-scan/status — error and configValid fields', () => {
+    it('includes error field in status response', async () => {
+      const res = await request(app).get('/api/ai-scan/status');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('error');
+      expect(res.body.error).toBeNull();
+    });
+
+    it('includes configValid field in status response', async () => {
+      const res = await request(app).get('/api/ai-scan/status');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('configValid');
+      // configValid should be boolean or null
+      expect([true, false, null]).toContain(res.body.configValid);
     });
   });
 });

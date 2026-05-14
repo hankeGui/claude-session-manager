@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { exec, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -8,7 +9,30 @@ import { deleteSession, batchDelete } from '../services/session-cleaner';
 import { hasTmux } from '../services/tmux';
 import { getClient } from '../services/ai-client';
 import * as aiScanner from '../services/ai-scanner';
+import { validate } from '../middleware/validate';
 
+
+const batchSessionsSchema = z.object({
+  sessionIds: z.array(z.string().min(1)).min(1).max(500),
+});
+
+const resumeSchema = z.object({
+  skipPermissions: z.boolean().optional(),
+  terminal: z.string().optional(),
+  terminalApp: z.string().optional(),
+});
+
+const titleSchema = z.object({
+  title: z.string().max(200).optional().default(''),
+});
+
+const favoriteSchema = z.object({
+  isFavorite: z.boolean(),
+});
+
+const preferencesSchema = z.object({
+  terminal: z.string().nullable().optional(),
+});
 
 const PREFS_FILE = path.join(__dirname, '..', '..', 'user-preferences.json');
 
@@ -70,21 +94,15 @@ router.delete('/:sessionId', async (req: Request, res: Response) => {
   res.json(result);
 });
 
-router.post('/batch-delete', async (req: Request, res: Response) => {
+router.post('/batch-delete', validate(batchSessionsSchema), async (req: Request, res: Response) => {
   const { sessionIds } = req.body;
-  if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
-    return res.status(400).json({ error: 'sessionIds array required' });
-  }
   const result = await batchDelete(sessionIds);
   res.json(result);
 });
 
 // Batch AI rename with SSE progress streaming
-router.post('/batch-rename', (req: Request, res: Response) => {
+router.post('/batch-rename', validate(batchSessionsSchema), (req: Request, res: Response) => {
   const { sessionIds } = req.body;
-  if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
-    return res.status(400).json({ error: 'sessionIds array required' });
-  }
 
   // Filter: skip empty sessions only (frontend handles customTitle pre-check)
   const toRename: { sessionId: string; project: any }[] = [];
@@ -215,7 +233,7 @@ router.post('/:sessionId/regenerate-summary', async (req: Request, res: Response
   }
 });
 
-router.put('/:sessionId/title', (req: Request, res: Response) => {
+router.put('/:sessionId/title', validate(titleSchema), (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const { title } = req.body;
 
@@ -228,7 +246,7 @@ router.put('/:sessionId/title', (req: Request, res: Response) => {
   res.json({ success: true, sessionId, title: title || '' });
 });
 
-router.put('/:sessionId/favorite', (req: Request, res: Response) => {
+router.put('/:sessionId/favorite', validate(favoriteSchema), (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const { isFavorite } = req.body;
 
@@ -237,11 +255,11 @@ router.put('/:sessionId/favorite', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Session not found' });
   }
 
-  scanner.setFavorite(sessionId, !!isFavorite);
-  res.json({ success: true, sessionId, isFavorite: !!isFavorite });
+  scanner.setFavorite(sessionId, isFavorite);
+  res.json({ success: true, sessionId, isFavorite });
 });
 
-router.post('/:sessionId/resume', (req: Request, res: Response) => {
+router.post('/:sessionId/resume', validate(resumeSchema), (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
@@ -249,7 +267,7 @@ router.post('/:sessionId/resume', (req: Request, res: Response) => {
   }
 
   const { project } = found;
-  const { skipPermissions, terminal: terminalChoice, terminalApp: terminalAppChoice } = req.body || {};
+  const { skipPermissions, terminal: terminalChoice, terminalApp: terminalAppChoice } = req.body;
   const cwd = project.projectPath || process.env.HOME;
   const flags = skipPermissions ? ' --dangerously-skip-permissions' : '';
   const claudeCmd = `cd ${(cwd as string).replace(/"/g, '\\"')} && claude${flags} --resume ${sessionId}`;
@@ -368,7 +386,7 @@ router.get('/preferences', (_req: Request, res: Response) => {
   res.json({ terminal: prefs.terminal || null, tmuxAvailable: hasTmux() });
 });
 
-router.put('/preferences', (req: Request, res: Response) => {
+router.put('/preferences', validate(preferencesSchema), (req: Request, res: Response) => {
   const { terminal } = req.body;
   const prefs = loadPrefs();
   prefs.terminal = terminal;

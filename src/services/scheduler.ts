@@ -434,3 +434,13 @@ export function getLiveOutput(id: string): { stdout: string; stderr: string } | 
 export function validateCron(expression: string): boolean {
   return cron.validate(expression);
 }
+
+export function shutdown() {
+  for (const [, timer] of timers) clearTimeout(timer);
+  for (const [, job] of cronJobs) job.stop();
+  for (const [, proc] of processes) proc.kill();
+  timers.clear();
+  cronJobs.clear();
+  processes.clear();
+  save();
+}

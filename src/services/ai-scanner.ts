@@ -19,9 +19,11 @@ let status = {
   phase: 'idle' as 'idle' | 'summary' | 'rename',
   total: 0, done: 0, cached: 0,
   result: null as { summaries: number; titles: number; skipped: number } | null,
+  error: null as string | null,
 };
 let paused = false;
 let batchDelay = 100; // ms between batches, increases on 429
+let configValid: boolean | null = null; // null = unknown, true = verified, false = failed/unconfigured
 
 function loadSummaries(): void {
   try {
@@ -49,7 +51,11 @@ export function removeSummary(sessionId: string): void {
 }
 
 export function getStatus() {
-  return { ...status, paused };
+  return { ...status, paused, configValid };
+}
+
+export function setConfigValid(valid: boolean): void {
+  configValid = valid;
 }
 
 export function clearSummaries(): void {
@@ -143,20 +149,28 @@ export async function regenerateSummary(sessionId: string): Promise<string | nul
   // Remove old summary
   delete summaries[sessionId];
   saveSummaries();
-  // Process
-  await processOne({ sessionId, dirName: session.dirName });
+  // Process with quality model (single operation)
+  await processOne({ sessionId, dirName: session.dirName }, 'quality');
   saveSummaries();
   return summaries[sessionId]?.summary || null;
 }
 
-async function processOne(item: { sessionId: string; dirName: string }): Promise<void> {
+async function processOne(item: { sessionId: string; dirName: string }, modelType: 'quality' | 'fast' = 'fast'): Promise<void> {
   try {
     const found = scanner.getSessionById(item.sessionId);
     if (!found) { status.done++; return; }
     const { session: sess, project } = found;
 
-    // Read all messages for full-session sampling
-    const result = await readSessionMessages(item.dirName, item.sessionId, { limit: 99999, offset: 0 });
+    // Check if we have an existing summary (hash changed → incremental update)
+    const existingSummary = summaries[item.sessionId]?.summary;
+    const isIncremental = !!existingSummary;
+
+    // For incremental updates, only read recent messages; otherwise read all
+    const readLimit = isIncremental ? 20 : 99999;
+    const result = await readSessionMessages(item.dirName, item.sessionId, {
+      limit: readLimit,
+      offset: isIncremental ? Math.max(0, sess.messageCount - 20) : 0,
+    });
     if (result.messages.length === 0) { status.done++; return; }
 
     // Extract PR/Jira ref tags if not already done
@@ -166,7 +180,50 @@ async function processOne(item: { sessionId: string; dirName: string }): Promise
       scanner.addTags(item.sessionId, refTags, 'refs');
     }
 
-    // Build context: sample messages across the session, scaling with length
+    // Incremental path: use existing summary + recent messages
+    if (isIncremental) {
+      const recentParts: string[] = [];
+      for (const m of result.messages) {
+        const role = m.type === 'user' ? 'User' : 'Assistant';
+        let text = m.content.replace(/```[\s\S]*?```/g, '[code]').replace(/\n{3,}/g, '\n\n');
+        text = m.type === 'user' ? text.slice(0, 400) : (text.length > 400 ? text.slice(-400) : text);
+        recentParts.push(`${role}: ${text}`);
+      }
+
+      const metaContext = [
+        `Project: ${project.displayName}`,
+        sess.gitBranch ? `Branch: ${sess.gitBranch}` : null,
+        `Messages: ${sess.messageCount}`,
+      ].filter(Boolean).join(' | ');
+
+      const prompt = `Here is an existing summary of a coding session, and the latest messages added since that summary was written.
+
+Metadata: ${metaContext}
+
+Existing summary:
+---
+${existingSummary}
+---
+
+Recent messages (latest ${result.messages.length}):
+---
+${recentParts.join('\n')}
+---
+
+Update the summary to incorporate the new work. Keep the same style and language. If the session now covers multiple tasks, use bullet points (each under 30 chars, 4-8 bullets max). If it's still one task, use 2-3 sentences.
+
+Output ONLY the updated summary, nothing else.`;
+
+      const aiResult = await askAiWithRetry(prompt, { maxTokens: 500, model: modelType });
+      const summary = aiResult.trim().replace(/^["']|["']$/g, '');
+      if (summary) {
+        summaries[item.sessionId] = { summary, generatedAt: new Date().toISOString(), contentHash: sess.contentHash };
+      }
+      status.done++;
+      return;
+    }
+
+    // Full processing path: sample messages across the session
     const msgs = result.messages;
     const total = msgs.length;
     let sampled: typeof msgs;
@@ -263,7 +320,7 @@ Do NOT describe the project in general terms. Focus on what THIS session accompl
 
 Output ONLY the summary, nothing else.`;
 
-    const aiResult = await askAiWithRetry(prompt, { maxTokens: isLongSession ? 500 : 300 });
+    const aiResult = await askAiWithRetry(prompt, { maxTokens: isLongSession ? 500 : 300, model: modelType });
     const summary = aiResult.trim().replace(/^["']|["']$/g, '');
 
     if (summary) {
@@ -271,15 +328,16 @@ Output ONLY the summary, nothing else.`;
     }
   } catch (err: any) {
     console.error(`AI scan error [${item.sessionId.slice(0, 8)}]: ${err.message}`);
+    throw err; // propagate to batch loop for immediate stop
   }
   status.done++;
 }
 
 /** Retry wrapper with exponential backoff for 429 rate limit errors */
-async function askAiWithRetry(prompt: string, opts: { maxTokens: number }, maxRetries = 3): Promise<string> {
+async function askAiWithRetry(prompt: string, opts: { maxTokens: number; model?: 'quality' | 'fast' }, maxRetries = 3): Promise<string> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await askAi(prompt, opts);
+      return await askAi(prompt, { ...opts, model: opts.model || 'fast' });
     } catch (err: any) {
       const is429 = err.message?.includes('429') || err.status === 429;
       if (!is429 || attempt === maxRetries) throw err;
@@ -296,8 +354,9 @@ async function askAiWithRetry(prompt: string, opts: { maxTokens: number }, maxRe
 /**
  * Generate a short title for a session via AI.
  * Prefers cached summary as context, falls back to reading messages.
+ * @param useFastModel - true for batch operations (cheaper), false for single operations (better quality)
  */
-export async function generateTitle(sessionId: string): Promise<string | null> {
+export async function generateTitle(sessionId: string, useFastModel = false): Promise<string | null> {
   const found = scanner.getSessionById(sessionId);
   if (!found) return null;
   const { session } = found;
@@ -332,7 +391,7 @@ ${context}
 
 Output ONLY the title, nothing else.`;
 
-  const result = await askAi(prompt, { maxTokens: 80 });
+  const result = await askAi(prompt, { maxTokens: 80, model: useFastModel ? 'fast' : 'quality' });
   if (!result) return null;
   return result.trim().replace(/^["']|["']$/g, '');
 }
@@ -340,7 +399,7 @@ Output ONLY the title, nothing else.`;
 async function generateTitleWithRetry(sessionId: string, maxRetries = 3): Promise<string | null> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await generateTitle(sessionId);
+      return await generateTitle(sessionId, true);
     } catch (err: any) {
       const is429 = err.message?.includes('429') || err.status === 429;
       if (!is429 || attempt === maxRetries) throw err;
@@ -362,6 +421,7 @@ export async function start(): Promise<void> {
 
   paused = false; // clear any leftover pause state
   status.cancelled = false;
+  status.error = null;
   loadSummaries();
 
   const data = scanner.getData();
@@ -371,9 +431,11 @@ export async function start(): Promise<void> {
 
   if (!getClient()) {
     console.log('AI scan skipped: AI not configured');
+    configValid = false;
     return;
   }
 
+  configValid = true;
   const queue: { sessionId: string; dirName: string }[] = [];
   const recentThreshold = Date.now() - 2 * 60 * 1000;
 
@@ -399,6 +461,8 @@ export async function start(): Promise<void> {
     console.log(`AI scan: all ${status.cached} sessions already cached`);
     // Skip to rename phase
     const titlesDone = await autoRenamePhase(data);
+    status.running = false;
+    status.phase = 'idle';
     status.result = { summaries: 0, titles: titlesDone, skipped: status.cached };
     return;
   }
@@ -414,7 +478,15 @@ export async function start(): Promise<void> {
     await waitWhilePaused();
 
     const batch = queue.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map((item) => processOne(item)));
+    try {
+      await Promise.all(batch.map((item) => processOne(item)));
+    } catch (err: any) {
+      status.error = err.message || 'AI request failed';
+      status.running = false;
+      status.phase = 'idle';
+      console.error(`AI scan stopped due to error: ${status.error}`);
+      break;
+    }
     saveSummaries();
 
     if (i + CONCURRENCY < queue.length) {
@@ -469,17 +541,21 @@ async function autoRenamePhase(data: ReturnType<typeof scanner.getData>): Promis
     await waitWhilePaused();
 
     const batch = renameQueue.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(async (sessionId) => {
-      try {
+    try {
+      await Promise.all(batch.map(async (sessionId) => {
         const title = await generateTitleWithRetry(sessionId);
         if (title) {
           scanner.setTitle(sessionId, title);
         }
-      } catch (err: any) {
-        console.error(`Auto-rename error [${sessionId.slice(0, 8)}]: ${err.message}`);
-      }
-      status.done++;
-    }));
+        status.done++;
+      }));
+    } catch (err: any) {
+      console.error(`Auto-rename error: ${err.message}`);
+      status.error = err.message || 'AI request failed';
+      status.running = false;
+      status.phase = 'idle';
+      break;
+    }
 
     if (i + CONCURRENCY < renameQueue.length) {
       await delay(batchDelay);

@@ -3,11 +3,9 @@ import { useState, useCallback, useEffect } from 'react';
 interface ConfirmOptions {
   title?: string;
   message: string;
-  html?: boolean;
   okText?: string;
   okClass?: string;
   checkbox?: { label: string; defaultChecked?: boolean };
-  onMount?: (close: () => void) => void;
 }
 
 interface ConfirmState extends ConfirmOptions {
@@ -48,12 +46,6 @@ export default function ConfirmDialog() {
     return () => document.removeEventListener('keydown', handler);
   }, [state]);
 
-  useEffect(() => {
-    if (state?.onMount) {
-      const close = () => { state.resolve({ confirmed: false }); setState(null); };
-      setTimeout(() => state.onMount!(close), 0);
-    }
-  }, [state]);
 
   if (!state) return null;
 
@@ -69,12 +61,8 @@ export default function ConfirmDialog() {
         {state.title && (
           <h3 className="text-center font-semibold mb-3">{state.title}</h3>
         )}
-        <div className="mb-5 text-sm text-left">
-          {state.html ? (
-            <div dangerouslySetInnerHTML={{ __html: state.message }} />
-          ) : (
-            <p>{state.message}</p>
-          )}
+        <div className="mb-5 text-sm text-left whitespace-pre-wrap">
+          <p>{state.message}</p>
         </div>
         {state.checkbox && (
           <label className="flex items-center gap-2 text-xs text-warning cursor-pointer mb-4">

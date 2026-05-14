@@ -1,6 +1,6 @@
 {
   "name": "claude-session-mgr",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Web UI for browsing, searching, resuming, and cleaning up Claude Code sessions",
   "main": "server.ts",
   "bin": {
@@ -15,7 +15,9 @@
     "test": "vitest run && cd client && npm test",
     "test:watch": "vitest",
     "test:backend": "vitest run",
-    "test:client": "cd client && npm test"
+    "test:client": "cd client && npm test",
+    "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s",
+    "version": "npm run changelog && git add CHANGELOG.md"
   },
   "keywords": [
     "claude",
@@ -47,11 +49,14 @@
     "express": "^4.21.0",
     "node-cron": "^4.2.1",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
     "@types/supertest": "^7.2.0",
+    "conventional-changelog-angular": "^8.3.1",
+    "conventional-changelog-cli": "^4.1.0",
     "supertest": "^7.2.2",
     "vitest": "^2.1.9"
   }

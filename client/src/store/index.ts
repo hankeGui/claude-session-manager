@@ -68,8 +68,10 @@ interface AppState {
   startBatchRename: (forceAll?: boolean) => void;
   dismissBatchRename: () => void;
   refresh: () => Promise<{ success: boolean; projects: number; sessions: number; pending: { summaries: number; titles: number } }>;
-  aiScanStatus: { running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; result?: { summaries: number; titles: number; skipped: number } | null } | null;
+  aiScanStatus: { running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; error?: string | null; result?: { summaries: number; titles: number; skipped: number } | null } | null;
   startAiScanPoll: () => void;
+  showAiConfig: boolean;
+  setShowAiConfig: (show: boolean) => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -88,6 +90,8 @@ export const useStore = create<AppState>((set, get) => ({
   aiTask: null,
   aiTaskMinimized: false,
   batchRename: null,
+  showAiConfig: false,
+  setShowAiConfig: (show: boolean) => set({ showAiConfig: show }),
 
   setView: (view) => set({ currentView: view }),
 
@@ -398,13 +402,15 @@ export const useStore = create<AppState>((set, get) => ({
           if (status.running) {
             wasRunning = true;
             set({ aiScanStatus: status });
-          } else if (wasRunning) {
+          } else if (wasRunning || status.error) {
             wasRunning = false;
             set({ aiScanStatus: { ...status, running: false } });
-            setTimeout(() => {
-              set({ aiScanStatus: null });
-              get().loadSessions();
-            }, 3000);
+            if (!status.error) {
+              setTimeout(() => {
+                set({ aiScanStatus: null });
+                get().loadSessions();
+              }, 3000);
+            }
           }
         } catch {}
       };

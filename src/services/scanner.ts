@@ -1,10 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import { PROJECTS_DIR, projectDirToDisplayName, sessionsIndexPath } from '../utils/paths';
-import { removeSummary } from './ai-scanner';
 import type { Project, Session, ScannerData } from '../types';
 
 let data: ScannerData = { projects: [] };
+
+// Callback for cleanup when a session is removed (avoids circular import with ai-scanner)
+let onSessionRemove: ((sessionId: string) => void) | null = null;
+export function registerOnSessionRemove(fn: (sessionId: string) => void) {
+  onSessionRemove = fn;
+}
 
 const TITLES_FILE = path.join(__dirname, '..', '..', 'session-titles.json');
 const FAVORITES_FILE = path.join(__dirname, '..', '..', 'session-favorites.json');
@@ -555,7 +560,7 @@ export function removeSession(sessionId: string): boolean {
       const favorites = loadFavorites();
       if (favorites[sessionId]) { delete favorites[sessionId]; saveFavorites(favorites); }
       removeTags(sessionId);
-      removeSummary(sessionId);
+      onSessionRemove?.(sessionId);
       return true;
     }
   }

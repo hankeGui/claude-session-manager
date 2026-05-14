@@ -1,12 +1,18 @@
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import fs from 'fs';
 import * as scanner from '../services/scanner';
 import { askAi, getClient } from '../services/ai-client';
 import * as aiScanner from '../services/ai-scanner';
 import { sessionJsonlPath } from '../utils/paths';
+import { validate } from '../middleware/validate';
 import type { Session } from '../types';
 
 const router = Router();
+
+const deepSearchSchema = z.object({
+  q: z.string().min(1).max(200),
+});
 
 // Fuzzy match: all query chars must appear in order in the target
 function fuzzyMatch(query: string, target: string): number {
@@ -137,11 +143,8 @@ router.get('/', (req: Request, res: Response) => {
   res.json({ results, total: results.length });
 });
 
-router.post('/deep', async (req: Request, res: Response) => {
+router.post('/deep', validate(deepSearchSchema), async (req: Request, res: Response) => {
   const { q } = req.body;
-  if (!q) {
-    return res.status(400).json({ error: 'Query required' });
-  }
 
   if (!getClient()) {
     return res.status(400).json({ error: 'AI not configured', needsConfig: true });
@@ -201,7 +204,7 @@ Return ONLY a JSON array of session IDs that likely match the user's search quer
 Output format: ["id1", "id2", ...]`;
 
   try {
-    const stdout = await askAi(prompt, { maxTokens: 2048 });
+    const stdout = await askAi(prompt, { maxTokens: 2048, model: 'quality' });
 
     let matchedIds: string[] = [];
     try {

@@ -54,7 +54,9 @@ npm run typecheck
 **On startup:**
 1. `scanner.scan()` — reads all projects/sessions, builds in-memory index
 2. `scanner.extractMetaTags()` — tags sessions with project dir + git branch
-3. `aiScanner.start()` — background: extracts PR/Jira refs → generates AI summaries → auto-renames untitled sessions
+3. `loadAiConfig()` → `saveAiConfig()` — sync effective config from `~/.claude/settings.json` to `user-preferences.json`
+4. `askAi('Say "ok"')` — verify AI connection; if fails, set `configValid=false` and skip scan
+5. `aiScanner.start()` — background: extracts PR/Jira refs → generates AI summaries → auto-renames untitled sessions
 
 **Persistence files (project root):**
 | File | Purpose |
@@ -81,16 +83,26 @@ npm run typecheck
 - Phase 1 (`refs`): extract PR/Jira ref tags (pure I/O, fast)
 - Phase 2 (`summary`): generate AI summaries for uncached sessions (concurrency 3)
 - Phase 3 (`rename`): auto-rename sessions without customTitle using `generateTitle()`
+- **Incremental summary**: when existing summary exists but hash changed (new messages), uses old summary + last 20 messages as context instead of full re-read
 - **Active session filtering**: sessions modified within last 2 minutes are skipped (actively in use)
 - **Controls**: `pause()`/`resume()`/`stop()` — stop cancels both phases (rename skipped if cancelled)
-- Status: `{ running, paused, cancelled, phase: 'idle'|'summary'|'rename', total, done, cached }`
+- **Error handling**: non-429 errors propagate from `processOne()` → batch loop → sets `status.error` and stops scan immediately
+- **configValid**: tracks AI verification state (`true`/`false`/`null`); set by server boot verification or `setConfigValid()`
+- Status: `{ running, paused, cancelled, phase: 'idle'|'summary'|'rename', total, done, cached, error, configValid }`
 - Frontend polls `/api/ai-scan/status` every 2s, shows progress widget with pause/resume/cancel buttons
+- **Error UI**: when `status.error` is set, `AiScanProgress` shows error message + "Configure AI" button
 - **Re-extract flow**: `/api/rescan` only scans + returns pending counts (does NOT auto-start AI); frontend shows confirmation dialog with estimated API calls before calling `/api/ai-scan/start`
 
 ### ai-client.ts — Anthropic SDK wrapper
 - Config priority: env vars > `~/.claude/settings.json` > `user-preferences.json`
-- Two auth modes: API key or auth token (custom header)
-- `askAi(prompt, opts)` — single call with 30s timeout
+- **Env vars**: `ANTHROPIC_MODEL` (quality), `ANTHROPIC_DEFAULT_HAIKU_MODEL` (fast/background), `ANTHROPIC_SMALL_FAST_MODEL` (deprecated, still read), `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`
+- **Dual model**: `qualityModel` for single ops (rename, summary, deep search); `fastModel` for batch processing
+- **Model fallback**: `qualityModel = MODEL || OPUS || SONNET || SMALL_FAST || HAIKU`; `fastModel = HAIKU || SMALL_FAST || SONNET || MODEL || OPUS`
+- **Model sanitization**: strips context window annotations like `[1m]`, `[200k]` from model names
+- **Dual auth**: both apiKey and authToken are kept in config; `getClient()` prefers authToken
+- **Auth fallback**: on 401/403, `askAi()` automatically retries with alternate auth method and caches the working client
+- **Boot sync**: server startup syncs effective config (from all sources) to `user-preferences.json`, then verifies connection
+- `askAi(prompt, opts)` — single call with 30s timeout, `opts.model: 'quality' | 'fast'`
 
 ### session-reader.ts — JSONL parser
 - Reads session message files, extracts user/assistant turns
@@ -114,7 +126,7 @@ npm run typecheck
 | sessions.ts | `/api/sessions` | Messages, delete, rename, resume (tmux/osascript), favorites |
 | search.ts | `/api/search` | Fuzzy/regex search, AI deep search |
 | scheduler.ts | `/api/scheduler` | Task CRUD, run, generate-cron |
-| settings.ts | `/api/settings` | AI config |
+| settings.ts | `/api/settings` | AI config (GET masked, PUT merge+verify, GET verify) |
 | server.ts (inline) | `/api/ai-scan` | `GET /status`, `POST /pause`, `POST /resume`, `POST /stop`, `POST /start` |
 | server.ts (inline) | `/api/rescan` | Re-scan files only (returns pending counts, no AI start) |
 
@@ -126,8 +138,10 @@ npm run typecheck
   - `SessionCard` — search highlight, score badge, matched field display
   - `SessionModal` — message view with timestamps, fold/unfold, noise toggle, tool/skill/agent tags
   - `ResumeDialog` — terminal selector, tmux checkbox, custom command builder, CLI flag reference
-  - `AiScanProgress` — fixed bottom-right widget showing background scan phase + progress
+  - `AiScanProgress` — fixed bottom-right widget showing background scan phase + progress + error state
+  - `AiConfigDialog` — AI settings modal (Base URL, API Key, Auth Token, Quality/Fast Model) with SecretField, save+verify
   - `BatchRenameIndicator` — SSE-driven progress for batch AI rename
+- **Header**: gear icon with three-color state indicator (green=verified, amber=configured, red=none)
 - **Build output**: `../dist/` (served by Express in production)
 
 ## Tag System Design
@@ -195,7 +209,9 @@ Manual fallback: `cd client && npm i && npm run build && cd .. && npm publish --
 ## Conventions
 
 - Small version bumps (patch/minor) only; publish only when explicitly asked
-- AI features degrade gracefully — if no API key configured, they're skipped
+- AI features degrade gracefully — if no API key configured, they're skipped; scan stops immediately on non-429 API errors
+- AI config: `PUT /api/settings/ai` merges empty fields with existing config (partial updates preserve credentials)
+- Auth fallback: if both apiKey + authToken configured, 401/403 on primary triggers automatic retry with alternate
 - All metadata cleaned up on session delete (titles, favorites, tags, summaries)
 - Background tasks use pause/resume pattern to avoid API overload conflicts
 - SSE streams check `res.destroyed || res.writableEnded` before writing

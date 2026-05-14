@@ -1,9 +1,41 @@
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { spawn, exec } from 'child_process';
 import * as scheduler from '../services/scheduler';
 import { hasTmux, isAlive, captureOutput, sessionName } from '../services/tmux';
+import { validate } from '../middleware/validate';
 
 const router = Router();
+
+const createTaskSchema = z.object({
+  prompt: z.string().min(1).max(10000),
+  scheduleType: z.enum(['immediate', 'once', 'cron']).default('immediate'),
+  scheduledAt: z.string().nullable().optional(),
+  cron: z.string().nullable().optional(),
+  skipPermissions: z.boolean().optional(),
+  openInTerminal: z.boolean().optional(),
+  workingDirectory: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+});
+
+const updateTaskSchema = z.object({
+  prompt: z.string().min(1).max(10000).optional(),
+  scheduleType: z.enum(['immediate', 'once', 'cron']).optional(),
+  scheduledAt: z.string().nullable().optional(),
+  cron: z.string().nullable().optional(),
+  skipPermissions: z.boolean().optional(),
+  openInTerminal: z.boolean().optional(),
+  workingDirectory: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+});
+
+const validateCronSchema = z.object({
+  expression: z.string().min(1),
+});
+
+const generateCronSchema = z.object({
+  text: z.string().min(1).max(500),
+});
 
 // List all tasks
 router.get('/tasks', (_req: Request, res: Response) => {
@@ -20,11 +52,8 @@ router.get('/tasks/:id', (req: Request, res: Response) => {
 });
 
 // Create task
-router.post('/tasks', (req: Request, res: Response) => {
+router.post('/tasks', validate(createTaskSchema), (req: Request, res: Response) => {
   const { prompt, scheduleType, scheduledAt, cron, skipPermissions, openInTerminal, workingDirectory, model } = req.body;
-  if (!prompt || !prompt.trim()) {
-    return res.status(400).json({ error: 'Prompt is required' });
-  }
   if (scheduleType === 'cron' && cron && !scheduler.validateCron(cron)) {
     return res.status(400).json({ error: 'Invalid cron expression' });
   }
@@ -44,7 +73,7 @@ router.post('/tasks', (req: Request, res: Response) => {
 });
 
 // Update task
-router.put('/tasks/:id', (req: Request, res: Response) => {
+router.put('/tasks/:id', validate(updateTaskSchema), (req: Request, res: Response) => {
   const id = req.params.id as string;
   const { prompt, scheduleType, scheduledAt, cron, skipPermissions, openInTerminal, workingDirectory, model } = req.body;
   if (cron && !scheduler.validateCron(cron)) {
@@ -111,17 +140,14 @@ router.get('/tasks/:id/output', (req: Request, res: Response) => {
 });
 
 // Validate cron expression
-router.post('/validate-cron', (req: Request, res: Response) => {
+router.post('/validate-cron', validate(validateCronSchema), (req: Request, res: Response) => {
   const { expression } = req.body;
-  res.json({ valid: scheduler.validateCron(expression || '') });
+  res.json({ valid: scheduler.validateCron(expression) });
 });
 
 // AI generate cron expression from natural language
-router.post('/generate-cron', (req: Request, res: Response) => {
+router.post('/generate-cron', validate(generateCronSchema), (req: Request, res: Response) => {
   const { text } = req.body;
-  if (!text || !text.trim()) {
-    return res.status(400).json({ error: 'Text is required' });
-  }
 
   const prompt = `Convert the following schedule description to a standard 5-field cron expression (minute hour day-of-month month day-of-week). Only output the cron expression, nothing else. No explanation, no markdown, just the expression.\n\nDescription: "${text.trim()}"`;
 

@@ -5,6 +5,7 @@ import { api } from '../api';
 export default function AiScanProgress() {
   const aiScanStatus = useStore((s) => s.aiScanStatus);
   const startAiScanPoll = useStore((s) => s.startAiScanPoll);
+  const setShowAiConfig = useStore((s) => s.setShowAiConfig);
 
   useEffect(() => {
     startAiScanPoll();
@@ -12,7 +13,7 @@ export default function AiScanProgress() {
 
   if (!aiScanStatus) return null;
 
-  const { running, paused, cancelled, phase, total, done, result } = aiScanStatus;
+  const { running, paused, cancelled, phase, total, done, error, result } = aiScanStatus;
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const phaseName = phase === 'summary' ? 'Summaries' : phase === 'rename' ? 'Rename' : '';
@@ -27,6 +28,38 @@ export default function AiScanProgress() {
   const handlePause = () => api.pauseAiScan();
   const handleResume = () => api.resumeAiScan();
   const handleStop = () => api.stopAiScan();
+  const handleDismiss = () => useStore.setState({ aiScanStatus: null });
+
+  // Error state
+  if (!running && error) {
+    return (
+      <div className="fixed bottom-4 right-4 w-[300px] bg-bg-secondary border border-red-500/50 rounded-lg shadow-lg z-[150] overflow-hidden">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-red-400">AI Extract Failed</span>
+            <button
+              onClick={handleDismiss}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-bg-card text-text-muted hover:text-text-primary transition-colors"
+              title="Dismiss"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+              </svg>
+            </button>
+          </div>
+          <p className="text-[11px] text-text-muted mb-3 line-clamp-2">{error}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { handleDismiss(); setShowAiConfig(true); }}
+              className="px-2.5 py-1 text-[11px] bg-accent/15 text-accent rounded hover:bg-accent/25 transition-colors"
+            >
+              Configure AI
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed bottom-4 right-4 w-[280px] bg-bg-secondary border border-border rounded-lg shadow-lg z-[150] overflow-hidden">

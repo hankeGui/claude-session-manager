@@ -9,6 +9,7 @@ import settingsRouter from './src/routes/settings';
 import * as scanner from './src/services/scanner';
 import * as scheduler from './src/services/scheduler';
 import * as aiScanner from './src/services/ai-scanner';
+import { loadAiConfig, saveAiConfig, askAi } from './src/services/ai-client';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -133,6 +134,9 @@ app.get('*', (_req, res) => {
 });
 
 async function start() {
+  // Wire up cross-service callbacks (avoids circular imports)
+  scanner.registerOnSessionRemove(aiScanner.removeSummary);
+
   console.log('Scanning sessions...');
   await scanner.scan();
   const data = scanner.getData();
@@ -141,12 +145,49 @@ async function start() {
   scheduler.init();
   console.log('Scheduler initialized');
 
-  // Background AI scan — fire and forget
-  aiScanner.start();
+  // Background AI scan — verify config before starting
+  const aiConfig = loadAiConfig();
+  if (aiConfig) {
+    // Sync effective config (from ~/.claude/settings.json + env) to user-preferences.json
+    saveAiConfig({
+      baseUrl: aiConfig.baseUrl,
+      apiKey: aiConfig.apiKey,
+      authToken: aiConfig.authToken,
+      qualityModel: aiConfig.qualityModel,
+      fastModel: aiConfig.fastModel,
+    });
+    try {
+      await askAi('Say "ok"', { maxTokens: 16, timeoutMs: 10000 });
+      console.log('AI connection verified, starting background scan');
+      aiScanner.start();
+    } catch (err: any) {
+      console.log(`AI connection failed (${err.message}), skipping auto-scan`);
+      aiScanner.setConfigValid(false);
+    }
+  } else {
+    console.log('AI not configured, skipping auto-scan');
+    aiScanner.setConfigValid(false);
+  }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Claude Session Manager v${PKG_VERSION} running at http://localhost:${PORT}`);
   });
+
+  // Graceful shutdown
+  function shutdown(signal: string) {
+    console.log(`\n${signal} received, shutting down...`);
+    aiScanner.stop();
+    scheduler.shutdown();
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+    // Force exit if connections linger
+    setTimeout(() => process.exit(1), 5000);
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 start().catch(err => {
