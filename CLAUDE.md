@@ -194,17 +194,24 @@ Key behaviors:
 ## Publishing
 
 ```bash
-# 1. Bump version
-npm version patch  # or minor
+# 1. Bump version (auto-generates CHANGELOG)
+npm version patch  # or minor, --no-git-tag-version if committing manually
 
-# 2. Push
+# 2. Build frontend
+npm run build
+
+# 3. Commit, tag, push
+git add -A && git commit -m "chore: release vX.Y.Z"
+git tag vX.Y.Z
 git push && git push --tags
 
-# 3. Create release (triggers GitHub Actions → npm publish)
-gh release create v<version> --title "v<version>" --generate-notes
+# 4. Create GitHub release → triggers GitHub Actions → auto npm publish
+gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes
 ```
 
-Manual fallback: `cd client && npm i && npm run build && cd .. && npm publish --access public`
+**IMPORTANT**: Do NOT run `npm publish` manually. GitHub Actions handles npm publish automatically when a release is created. Only use manual publish as a last resort if Actions fail.
+
+Manual fallback (only if Actions fail): `cd client && npm i && npm run build && cd .. && npm publish --access public --registry https://registry.npmjs.org`
 
 ## Conventions
 
