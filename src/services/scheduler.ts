@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn, exec, ChildProcess } from 'child_process';
-import cron from 'node-cron';
+import cron, { ScheduledTask as CronScheduledTask } from 'node-cron';
 import type { ScheduledTask } from '../types';
 import { hasTmux, executeInTmux, sessionName, killSession, isAlive, captureOutput } from './tmux';
 
@@ -10,7 +10,7 @@ const DATA_FILE = path.join(process.cwd(), 'scheduled-tasks.json');
 
 let tasks: ScheduledTask[] = [];
 const timers = new Map<string, NodeJS.Timeout>();
-const cronJobs = new Map<string, cron.ScheduledTask>();
+const cronJobs = new Map<string, CronScheduledTask>();
 const processes = new Map<string, ChildProcess>();
 const liveOutput = new Map<string, { stdout: string; stderr: string }>();
 

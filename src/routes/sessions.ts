@@ -27,7 +27,7 @@ function savePrefs(prefs: Record<string, any>): void {
 const router = Router();
 
 router.get('/:sessionId/messages', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const limit = parseInt(req.query.limit as string) || 100;
   const offset = parseInt(req.query.offset as string) || 0;
   const includeNoise = req.query.noise === '1';
@@ -62,7 +62,7 @@ router.get('/:sessionId/messages', async (req: Request, res: Response) => {
 });
 
 router.delete('/:sessionId', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const result = await deleteSession(sessionId);
   if (!result.success) {
     return res.status(404).json({ error: result.error });
@@ -154,25 +154,26 @@ router.post('/batch-rename', (req: Request, res: Response) => {
   }
 
   (async () => {
-    for (let i = 0; i < toRename.length; i += CONCURRENCY) {
-      if (cancelled) break;
-      const batch = toRename.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(batch.map(({ sessionId }) => processOne(sessionId)));
+    try {
+      for (let i = 0; i < toRename.length; i += CONCURRENCY) {
+        if (cancelled) break;
+        const batch = toRename.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(batch.map(({ sessionId }) => processOne(sessionId)));
+      }
+      send({ type: 'complete', done, failed, skipped: skippedList.length, total });
+      try { res.end(); } catch {}
+    } finally {
+      aiScanner.resume();
     }
-
-    aiScanner.resume();
-    send({ type: 'complete', done, failed, skipped: skippedList.length, total });
-    try { res.end(); } catch {}
   })();
 
   res.on('close', () => {
     cancelled = true;
-    aiScanner.resume();
   });
 });
 
 router.post('/:sessionId/auto-rename', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
     return res.status(404).json({ error: 'Session not found' });
@@ -195,7 +196,7 @@ router.post('/:sessionId/auto-rename', async (req: Request, res: Response) => {
 });
 
 router.post('/:sessionId/regenerate-summary', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
     return res.status(404).json({ error: 'Session not found' });
@@ -215,7 +216,7 @@ router.post('/:sessionId/regenerate-summary', async (req: Request, res: Response
 });
 
 router.put('/:sessionId/title', (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const { title } = req.body;
 
   const found = scanner.getSessionById(sessionId);
@@ -228,7 +229,7 @@ router.put('/:sessionId/title', (req: Request, res: Response) => {
 });
 
 router.put('/:sessionId/favorite', (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const { isFavorite } = req.body;
 
   const found = scanner.getSessionById(sessionId);
@@ -241,7 +242,7 @@ router.put('/:sessionId/favorite', (req: Request, res: Response) => {
 });
 
 router.post('/:sessionId/resume', (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const found = scanner.getSessionById(sessionId);
   if (!found) {
     return res.status(404).json({ error: 'Session not found' });

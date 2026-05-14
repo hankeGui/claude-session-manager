@@ -386,29 +386,32 @@ export const useStore = create<AppState>((set, get) => ({
 
   aiScanStatus: null,
 
-  startAiScanPoll: () => {
-    let wasRunning = false;
-    const poll = async () => {
-      try {
-        const status = await api.getAiScanStatus();
-        if (status.running) {
-          wasRunning = true;
-          set({ aiScanStatus: status });
-        } else if (wasRunning) {
-          // Just finished — show result briefly then dismiss
-          wasRunning = false;
-          set({ aiScanStatus: { ...status, running: false } });
-          setTimeout(() => {
-            set({ aiScanStatus: null });
-            // Refresh session list to show new titles
-            get().loadSessions();
-          }, 3000);
-        }
-      } catch {}
+  startAiScanPoll: (() => {
+    let started = false;
+    return () => {
+      if (started) return; // prevent duplicate intervals
+      started = true;
+      let wasRunning = false;
+      const poll = async () => {
+        try {
+          const status = await api.getAiScanStatus();
+          if (status.running) {
+            wasRunning = true;
+            set({ aiScanStatus: status });
+          } else if (wasRunning) {
+            wasRunning = false;
+            set({ aiScanStatus: { ...status, running: false } });
+            setTimeout(() => {
+              set({ aiScanStatus: null });
+              get().loadSessions();
+            }, 3000);
+          }
+        } catch {}
+      };
+      poll();
+      setInterval(poll, 2000);
     };
-    poll();
-    setInterval(poll, 2000);
-  },
+  })(),
 
   refresh: async () => {
     const result = await api.rescan();

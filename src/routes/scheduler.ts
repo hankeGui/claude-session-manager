@@ -13,7 +13,8 @@ router.get('/tasks', (_req: Request, res: Response) => {
 
 // Get single task
 router.get('/tasks/:id', (req: Request, res: Response) => {
-  const task = scheduler.getTask(req.params.id);
+  const id = req.params.id as string;
+  const task = scheduler.getTask(id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   res.json(task);
 });
@@ -44,12 +45,13 @@ router.post('/tasks', (req: Request, res: Response) => {
 
 // Update task
 router.put('/tasks/:id', (req: Request, res: Response) => {
+  const id = req.params.id as string;
   const { prompt, scheduleType, scheduledAt, cron, skipPermissions, openInTerminal, workingDirectory, model } = req.body;
   if (cron && !scheduler.validateCron(cron)) {
     return res.status(400).json({ error: 'Invalid cron expression' });
   }
 
-  const task = scheduler.updateTask(req.params.id, {
+  const task = scheduler.updateTask(id, {
     ...(prompt !== undefined && { prompt }),
     ...(scheduleType !== undefined && { scheduleType }),
     ...(scheduledAt !== undefined && { scheduledAt }),
@@ -66,28 +68,32 @@ router.put('/tasks/:id', (req: Request, res: Response) => {
 
 // Delete task
 router.delete('/tasks/:id', (req: Request, res: Response) => {
-  const success = scheduler.deleteTask(req.params.id);
+  const id = req.params.id as string;
+  const success = scheduler.deleteTask(id);
   if (!success) return res.status(404).json({ error: 'Task not found' });
   res.json({ success: true });
 });
 
 // Run now
 router.post('/tasks/:id/run', (req: Request, res: Response) => {
-  const success = scheduler.runNow(req.params.id);
+  const id = req.params.id as string;
+  const success = scheduler.runNow(id);
   if (!success) return res.status(400).json({ error: 'Task not found or not runnable' });
   res.json({ success: true });
 });
 
 // Cancel task
 router.post('/tasks/:id/cancel', (req: Request, res: Response) => {
-  const success = scheduler.cancelTask(req.params.id);
+  const id = req.params.id as string;
+  const success = scheduler.cancelTask(id);
   if (!success) return res.status(400).json({ error: 'Task not found or not cancellable' });
   res.json({ success: true });
 });
 
 // Get live output for running task
 router.get('/tasks/:id/output', (req: Request, res: Response) => {
-  const task = scheduler.getTask(req.params.id);
+  const id = req.params.id as string;
+  const task = scheduler.getTask(id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
 
   // Try tmux capture first
@@ -96,7 +102,7 @@ router.get('/tasks/:id/output', (req: Request, res: Response) => {
     return res.json({ status: 'running', stdout: output, stderr: '' });
   }
 
-  const live = scheduler.getLiveOutput(req.params.id);
+  const live = scheduler.getLiveOutput(id);
   if (live) {
     res.json({ status: 'running', stdout: live.stdout, stderr: live.stderr });
   } else {
@@ -150,7 +156,8 @@ router.get('/capabilities', (_req: Request, res: Response) => {
 
 // Attach to tmux session (opens terminal with tmux attach)
 router.post('/tasks/:id/attach', (req: Request, res: Response) => {
-  const task = scheduler.getTask(req.params.id);
+  const id = req.params.id as string;
+  const task = scheduler.getTask(id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   if (!task.tmuxSession) return res.status(400).json({ error: 'No tmux session for this task' });
   if (!isAlive(task.tmuxSession)) return res.status(400).json({ error: 'Session has ended' });

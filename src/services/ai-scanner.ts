@@ -21,6 +21,7 @@ let status = {
   result: null as { summaries: number; titles: number; skipped: number } | null,
 };
 let paused = false;
+let batchDelay = 100; // ms between batches, increases on 429
 
 function loadSummaries(): void {
   try {
@@ -260,7 +261,7 @@ Do NOT describe the project in general terms. Focus on what THIS session accompl
 
 Output ONLY the summary, nothing else.`;
 
-    const aiResult = await askAi(prompt, { maxTokens: isLongSession ? 500 : 300 });
+    const aiResult = await askAiWithRetry(prompt, { maxTokens: isLongSession ? 500 : 300 });
     const summary = aiResult.trim().replace(/^["']|["']$/g, '');
 
     if (summary) {
@@ -270,6 +271,24 @@ Output ONLY the summary, nothing else.`;
     console.error(`AI scan error [${item.sessionId.slice(0, 8)}]: ${err.message}`);
   }
   status.done++;
+}
+
+/** Retry wrapper with exponential backoff for 429 rate limit errors */
+async function askAiWithRetry(prompt: string, opts: { maxTokens: number }, maxRetries = 3): Promise<string> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await askAi(prompt, opts);
+    } catch (err: any) {
+      const is429 = err.message?.includes('429') || err.status === 429;
+      if (!is429 || attempt === maxRetries) throw err;
+      // Escalate batch delay to prevent further 429s
+      batchDelay = Math.min(batchDelay * 2, 30000);
+      const backoff = Math.pow(2, attempt + 1) * 5000; // 10s, 20s, 40s
+      console.log(`Rate limited, batch delay → ${batchDelay}ms, waiting ${backoff / 1000}s before retry (${attempt + 1}/${maxRetries})...`);
+      await delay(backoff);
+    }
+  }
+  throw new Error('unreachable');
 }
 
 /**
@@ -314,6 +333,22 @@ Output ONLY the title, nothing else.`;
   const result = await askAi(prompt, { maxTokens: 80 });
   if (!result) return null;
   return result.trim().replace(/^["']|["']$/g, '');
+}
+
+async function generateTitleWithRetry(sessionId: string, maxRetries = 3): Promise<string | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await generateTitle(sessionId);
+    } catch (err: any) {
+      const is429 = err.message?.includes('429') || err.status === 429;
+      if (!is429 || attempt === maxRetries) throw err;
+      batchDelay = Math.min(batchDelay * 2, 30000);
+      const backoff = Math.pow(2, attempt + 1) * 5000;
+      console.log(`Rate limited (rename), batch delay → ${batchDelay}ms, waiting ${backoff / 1000}s before retry (${attempt + 1}/${maxRetries})...`);
+      await delay(backoff);
+    }
+  }
+  return null;
 }
 
 /**
@@ -371,6 +406,7 @@ export async function start(): Promise<void> {
   console.log(`AI scan started: ${queue.length} sessions to process (${status.cached} cached)`);
 
   const CONCURRENCY = 3;
+  batchDelay = 100;
   for (let i = 0; i < queue.length; i += CONCURRENCY) {
     if (!status.running) break;
     await waitWhilePaused();
@@ -380,7 +416,7 @@ export async function start(): Promise<void> {
     saveSummaries();
 
     if (i + CONCURRENCY < queue.length) {
-      await delay(100);
+      await delay(batchDelay);
     }
   }
 
@@ -433,7 +469,7 @@ async function autoRenamePhase(data: ReturnType<typeof scanner.getData>): Promis
     const batch = renameQueue.slice(i, i + CONCURRENCY);
     await Promise.all(batch.map(async (sessionId) => {
       try {
-        const title = await generateTitle(sessionId);
+        const title = await generateTitleWithRetry(sessionId);
         if (title) {
           scanner.setTitle(sessionId, title);
         }
@@ -444,7 +480,7 @@ async function autoRenamePhase(data: ReturnType<typeof scanner.getData>): Promis
     }));
 
     if (i + CONCURRENCY < renameQueue.length) {
-      await delay(100);
+      await delay(batchDelay);
     }
   }
 

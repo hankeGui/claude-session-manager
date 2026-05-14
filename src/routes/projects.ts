@@ -21,7 +21,7 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 router.get('/:dirName/sessions', (req: Request, res: Response) => {
-  const { dirName } = req.params;
+  const dirName = req.params.dirName as string;
   const { sort = 'modified', order = 'desc', empty } = req.query as {
     sort?: string; order?: string; empty?: string;
   };

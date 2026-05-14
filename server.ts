@@ -97,7 +97,7 @@ app.get('/api/stats', (_req, res) => {
 app.get('/api/check-update', async (_req, res) => {
   try {
     const resp = await fetch('https://registry.npmjs.org/claude-session-mgr/latest');
-    const data = await resp.json();
+    const data = await resp.json() as { version: string };
     res.json({ current: PKG_VERSION, latest: data.version, hasUpdate: data.version !== PKG_VERSION });
   } catch {
     res.status(500).json({ error: 'Failed to check for updates' });
