@@ -1,3 +1,9 @@
+## <small>1.4.3 (2026-05-21)</small>
+
+* docs: clarify publishing flow — GitHub Actions handles npm publish ([c0d1e5d](https://github.com/hankeGui/claude-session-manager/commit/c0d1e5d))
+
+
+
 ## <small>1.4.2 (2026-05-14)</small>
 
 * fix: security hardening — XSS, shell injection, race conditions, rate limiting ([a8e4e19](https://github.com/hankeGui/claude-session-manager/commit/a8e4e19))
