@@ -1,3 +1,8 @@
+## <small>1.4.4 (2026-05-21)</small>
+
+
+
+
 ## <small>1.4.3 (2026-05-21)</small>
 
 * docs: clarify publishing flow — GitHub Actions handles npm publish ([c0d1e5d](https://github.com/hankeGui/claude-session-manager/commit/c0d1e5d))

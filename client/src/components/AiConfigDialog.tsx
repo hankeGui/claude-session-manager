@@ -12,7 +12,8 @@ export default function AiConfigDialog({ onSaved }: { onSaved?: () => void } = {
   const [qualityModel, setQualityModel] = useState('');
   const [fastModel, setFastModel] = useState('');
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'loaded'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [maskedApiKey, setMaskedApiKey] = useState('');
   const [maskedAuthToken, setMaskedAuthToken] = useState('');
@@ -22,6 +23,7 @@ export default function AiConfigDialog({ onSaved }: { onSaved?: () => void } = {
     setStatus('idle');
     setErrorMsg('');
     setSaving(false);
+    setLoading(false);
     setApiKey('');
     setAuthToken('');
     api.getAiSettings().then((settings) => {
@@ -56,6 +58,33 @@ export default function AiConfigDialog({ onSaved }: { onSaved?: () => void } = {
       setErrorMsg(err.message || 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLoadFromClaude = async () => {
+    setLoading(true);
+    setStatus('idle');
+    setErrorMsg('');
+    try {
+      const config = await api.getClaudeNativeConfig();
+      if (!config.found) {
+        setStatus('error');
+        setErrorMsg('No credentials found in ~/.claude/settings.json or environment variables');
+        return;
+      }
+      setBaseUrl(config.baseUrl || '');
+      setApiKey(config.apiKey || '');
+      setAuthToken(config.authToken || '');
+      setQualityModel(config.qualityModel || '');
+      setFastModel(config.fastModel || '');
+      setMaskedApiKey('');
+      setMaskedAuthToken('');
+      setStatus('loaded');
+    } catch (err: any) {
+      setStatus('error');
+      setErrorMsg(err.message || 'Failed to load Claude config');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -95,26 +124,41 @@ export default function AiConfigDialog({ onSaved }: { onSaved?: () => void } = {
               Connected successfully
             </div>
           )}
+          {status === 'loaded' && (
+            <div className="text-[11px] text-blue-400 bg-blue-500/10 px-3 py-2 rounded">
+              Loaded from Claude config — click Save & Verify to apply
+            </div>
+          )}
           {status === 'error' && (
             <div className="text-[11px] text-red-400 bg-red-500/10 px-3 py-2 rounded">
               {errorMsg}
             </div>
           )}
         </div>
-        <div className="px-6 py-3 border-t border-border flex justify-end gap-2">
+        <div className="px-6 py-3 border-t border-border flex items-center justify-between gap-2">
           <button
-            onClick={() => setShow(false)}
-            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+            onClick={handleLoadFromClaude}
+            disabled={loading || saving}
+            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary border border-border rounded-md hover:border-border-hover disabled:opacity-50 transition-colors"
+            title="Load credentials from ~/.claude/settings.json and environment variables"
           >
-            Cancel
+            {loading ? 'Loading...' : 'Load from Claude'}
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || (!apiKey && !authToken && !maskedApiKey && !maskedAuthToken)}
-            className="px-4 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Verifying...' : 'Save & Verify'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShow(false)}
+              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || (!apiKey && !authToken && !maskedApiKey && !maskedAuthToken)}
+              className="px-4 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Verifying...' : 'Save & Verify'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

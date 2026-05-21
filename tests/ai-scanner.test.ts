@@ -22,6 +22,8 @@ const mockGetData = vi.fn().mockReturnValue({
 });
 const mockHasTagSource = vi.fn().mockReturnValue(false);
 const mockAddTags = vi.fn();
+const mockAddTag = vi.fn();
+const mockRemoveTag = vi.fn();
 const mockMarkTagSource = vi.fn();
 const mockFlushTags = vi.fn();
 
@@ -29,6 +31,8 @@ vi.mock('../src/services/scanner', () => ({
   getData: () => mockGetData(),
   hasTagSource: (...args: any[]) => mockHasTagSource(...args),
   addTags: (...args: any[]) => mockAddTags(...args),
+  addTag: (...args: any[]) => mockAddTag(...args),
+  removeTag: (...args: any[]) => mockRemoveTag(...args),
   markTagSource: (...args: any[]) => mockMarkTagSource(...args),
   flushTags: () => mockFlushTags(),
 }));
@@ -54,7 +58,10 @@ describe('ai-scanner', () => {
   beforeEach(async () => {
     vi.mocked(fs.readFileSync).mockReturnValue('{}');
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+    vi.mocked(fs.existsSync).mockReturnValue(true); // project directories exist by default
     mockAddTags.mockClear();
+    mockAddTag.mockClear();
+    mockRemoveTag.mockClear();
     mockHasTagSource.mockReturnValue(false);
     mockMarkTagSource.mockClear();
 
@@ -125,6 +132,45 @@ describe('ai-scanner', () => {
       aiScanner.stop();
       const status = aiScanner.getStatus();
       expect(status.running).toBe(false);
+    });
+  });
+
+  describe('project-deleted tag', () => {
+    it('adds project-deleted tag when project directory does not exist', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      await aiScanner.start();
+      expect(mockAddTag).toHaveBeenCalledWith('session-1', 'project-deleted');
+      expect(mockAddTag).toHaveBeenCalledWith('session-3', 'project-deleted');
+    });
+
+    it('does not add project-deleted tag when project exists', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      await aiScanner.start();
+      const deletedCalls = mockAddTag.mock.calls.filter((c: any) => c[1] === 'project-deleted');
+      expect(deletedCalls).toHaveLength(0);
+    });
+
+    it('removes project-deleted tag when project directory is restored', async () => {
+      mockGetData.mockReturnValueOnce({
+        projects: [{
+          dirName: 'test-project',
+          displayName: 'Test Project',
+          projectPath: '/Users/test/project',
+          sessions: [
+            { sessionId: 'session-1', dirName: 'test-project', isEmpty: false, messageCount: 5, tags: ['project-deleted'] },
+          ],
+        }],
+      });
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      await aiScanner.start();
+      expect(mockRemoveTag).toHaveBeenCalledWith('session-1', 'project-deleted');
+    });
+
+    it('skips project-deleted check for empty sessions', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      await aiScanner.start();
+      const session2Calls = mockAddTag.mock.calls.filter((c: any) => c[0] === 'session-2');
+      expect(session2Calls).toHaveLength(0);
     });
   });
 });

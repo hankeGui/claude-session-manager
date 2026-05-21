@@ -129,6 +129,67 @@ export function saveAiConfig(config: {
 }
 
 /**
+ * Read raw AI config values from ~/.claude/settings.json and env vars only (excludes user-preferences).
+ * Used to let users reload their Claude native config into the UI.
+ */
+export function loadClaudeNativeConfig(): {
+  baseUrl: string;
+  apiKey: string;
+  authToken: string;
+  qualityModel: string;
+  fastModel: string;
+} | null {
+  const env = process.env;
+  const claudeSettings = readJson(CLAUDE_SETTINGS);
+
+  const sources = [
+    claudeSettings?.env || {},
+    {
+      ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL,
+      ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+      ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_MODEL: env.ANTHROPIC_MODEL,
+      ANTHROPIC_SMALL_FAST_MODEL: env.ANTHROPIC_SMALL_FAST_MODEL,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    },
+  ];
+
+  let baseUrl = '', apiKey = '', authToken = '', model = '', smallModel = '', haikuModel = '', opusModel = '', sonnetModel = '';
+  for (const src of sources) {
+    if (src.ANTHROPIC_BASE_URL) baseUrl = src.ANTHROPIC_BASE_URL;
+    if (src.ANTHROPIC_API_KEY) apiKey = src.ANTHROPIC_API_KEY;
+    if (src.ANTHROPIC_AUTH_TOKEN) authToken = src.ANTHROPIC_AUTH_TOKEN;
+    if (src.ANTHROPIC_MODEL) model = src.ANTHROPIC_MODEL;
+    if (src.ANTHROPIC_SMALL_FAST_MODEL) smallModel = src.ANTHROPIC_SMALL_FAST_MODEL;
+    if (src.ANTHROPIC_DEFAULT_HAIKU_MODEL) haikuModel = src.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+    if (src.ANTHROPIC_DEFAULT_OPUS_MODEL) opusModel = src.ANTHROPIC_DEFAULT_OPUS_MODEL;
+    if (src.ANTHROPIC_DEFAULT_SONNET_MODEL) sonnetModel = src.ANTHROPIC_DEFAULT_SONNET_MODEL;
+  }
+
+  if (!apiKey && !authToken) return null;
+
+  const stripAnnotation = (m: string) => m.replace(/\[[\d]+[kmKM]?\]$/i, '').trim();
+  if (model) model = stripAnnotation(model);
+  if (smallModel) smallModel = stripAnnotation(smallModel);
+  if (haikuModel) haikuModel = stripAnnotation(haikuModel);
+  if (opusModel) opusModel = stripAnnotation(opusModel);
+  if (sonnetModel) sonnetModel = stripAnnotation(sonnetModel);
+
+  const qualityModel = model || opusModel || sonnetModel || smallModel || haikuModel;
+  const fastModel = haikuModel || smallModel || sonnetModel || model || opusModel;
+
+  return {
+    baseUrl: baseUrl || 'https://api.anthropic.com',
+    apiKey,
+    authToken,
+    qualityModel,
+    fastModel,
+  };
+}
+
+/**
  * Build Anthropic client with specific auth method
  */
 function buildClient(config: AiConfig, authMethod: 'apiKey' | 'authToken'): Anthropic {

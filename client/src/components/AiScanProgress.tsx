@@ -6,6 +6,7 @@ export default function AiScanProgress() {
   const aiScanStatus = useStore((s) => s.aiScanStatus);
   const startAiScanPoll = useStore((s) => s.startAiScanPoll);
   const setShowAiConfig = useStore((s) => s.setShowAiConfig);
+  const dismissAiScanError = useStore((s) => s.dismissAiScanError);
 
   useEffect(() => {
     startAiScanPoll();
@@ -28,7 +29,7 @@ export default function AiScanProgress() {
   const handlePause = () => api.pauseAiScan();
   const handleResume = () => api.resumeAiScan();
   const handleStop = () => api.stopAiScan();
-  const handleDismiss = () => useStore.setState({ aiScanStatus: null });
+  const handleDismiss = () => dismissAiScanError();
 
   // Error state
   if (!running && error) {

@@ -141,6 +141,16 @@ export function addTag(sessionId: string, tag: string): void {
   }
 }
 
+export function removeTag(sessionId: string, tag: string): void {
+  const entry = tagStore[sessionId];
+  if (!entry) return;
+  const idx = entry.tags.indexOf(tag);
+  if (idx === -1) return;
+  entry.tags.splice(idx, 1);
+  saveTags();
+  syncSessionTags(sessionId);
+}
+
 export function addTags(sessionId: string, newTags: string[], source?: string): void {
   let changed = false;
   for (const t of newTags) {

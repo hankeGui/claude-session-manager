@@ -4,6 +4,8 @@ import * as scanner from './scanner';
 import { readSessionMessages } from './session-reader';
 import { askAi, getClient } from './ai-client';
 
+const PROJECT_DELETED_TAG = 'project-deleted';
+
 const SUMMARIES_FILE = path.join(__dirname, '..', '..', 'session-ai-summaries.json');
 
 interface AiSummaryEntry {
@@ -114,8 +116,17 @@ function extractRefTags(text: string): string[] {
 async function extractAllRefTags(data: ReturnType<typeof scanner.getData>): Promise<void> {
   const toScan: { sessionId: string; dirName: string }[] = [];
   for (const project of data.projects) {
+    // Check if the project directory still exists on disk
+    const projectExists = !project.projectPath || fs.existsSync(project.projectPath);
     for (const session of project.sessions) {
       if (session.isEmpty) continue;
+      // Update project-deleted tag based on current filesystem state
+      const hasDeletedTag = session.tags.includes(PROJECT_DELETED_TAG);
+      if (!projectExists && !hasDeletedTag) {
+        scanner.addTag(session.sessionId, PROJECT_DELETED_TAG);
+      } else if (projectExists && hasDeletedTag) {
+        scanner.removeTag(session.sessionId, PROJECT_DELETED_TAG);
+      }
       if (scanner.hasTagSource(session.sessionId, 'refs')) continue;
       toScan.push({ sessionId: session.sessionId, dirName: session.dirName });
     }
@@ -570,4 +581,8 @@ export function stop(): void {
   status.running = false;
   status.cancelled = true;
   paused = false;
+}
+
+export function clearError(): void {
+  status.error = null;
 }

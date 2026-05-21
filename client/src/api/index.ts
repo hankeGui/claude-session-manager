@@ -73,6 +73,7 @@ export const api = {
   pauseAiScan: () => request<{ success: boolean }>('/api/ai-scan/pause', { method: 'POST' }),
   resumeAiScan: () => request<{ success: boolean }>('/api/ai-scan/resume', { method: 'POST' }),
   stopAiScan: () => request<{ success: boolean }>('/api/ai-scan/stop', { method: 'POST' }),
+  clearAiScanError: () => request<{ success: boolean }>('/api/ai-scan/clear-error', { method: 'POST' }),
 
   checkUpdate: () => request<UpdateInfo>('/api/check-update'),
 
@@ -181,6 +182,9 @@ export const api = {
 
   getAiSettings: () =>
     request<{ isConfigured: boolean; baseUrl?: string; apiKey?: string; authToken?: string; qualityModel?: string; fastModel?: string }>('/api/settings/ai'),
+
+  getClaudeNativeConfig: () =>
+    request<{ found: boolean; baseUrl?: string; apiKey?: string; authToken?: string; qualityModel?: string; fastModel?: string }>('/api/settings/ai/claude-config'),
 
   verifyAiConnection: () =>
     request<{ ok: boolean; error?: string }>('/api/settings/ai/verify'),

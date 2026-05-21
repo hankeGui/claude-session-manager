@@ -65,6 +65,11 @@ app.post('/api/ai-scan/stop', (_req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/ai-scan/clear-error', (_req, res) => {
+  aiScanner.clearError();
+  res.json({ success: true });
+});
+
 app.post('/api/rescan', async (_req, res) => {
   await scanner.scan();
   const data = scanner.getData();

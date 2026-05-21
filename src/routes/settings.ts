@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { loadAiConfig, saveAiConfig, askAi } from '../services/ai-client';
+import { loadAiConfig, loadClaudeNativeConfig, saveAiConfig, askAi } from '../services/ai-client';
 import { validate } from '../middleware/validate';
 
 const router = Router();
@@ -31,6 +31,22 @@ router.get('/ai', (_req: Request, res: Response) => {
     baseUrl: config.baseUrl,
     apiKey: maskSecret(config.apiKey),
     authToken: maskSecret(config.authToken),
+    qualityModel: config.qualityModel,
+    fastModel: config.fastModel,
+  });
+});
+
+// GET /api/settings/ai/claude-config - read config from ~/.claude/settings.json + env vars only
+router.get('/ai/claude-config', (_req: Request, res: Response) => {
+  const config = loadClaudeNativeConfig();
+  if (!config) {
+    return res.json({ found: false });
+  }
+  res.json({
+    found: true,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    authToken: config.authToken,
     qualityModel: config.qualityModel,
     fastModel: config.fastModel,
   });

@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { api, Project, Session, Stats } from '../api';
 
+// Module-level variable so startAiScanPoll closure and dismissAiScanError can share state
+let _suppressedAiScanError: string | null = null;
+
 export type AppView = 'sessions' | 'scheduler';
 export type SortField = 'modified' | 'created' | 'messageCount' | 'diskSize';
 export type SortOrder = 'asc' | 'desc';
@@ -70,6 +73,7 @@ interface AppState {
   refresh: () => Promise<{ success: boolean; projects: number; sessions: number; pending: { summaries: number; titles: number } }>;
   aiScanStatus: { running: boolean; paused: boolean; cancelled: boolean; phase: string; total: number; done: number; error?: string | null; result?: { summaries: number; titles: number; skipped: number } | null } | null;
   startAiScanPoll: () => void;
+  dismissAiScanError: () => void;
   showAiConfig: boolean;
   setShowAiConfig: (show: boolean) => void;
 }
@@ -399,8 +403,11 @@ export const useStore = create<AppState>((set, get) => ({
       const poll = async () => {
         try {
           const status = await api.getAiScanStatus();
+          // Don't re-show an error the user already dismissed
+          if (status.error && status.error === _suppressedAiScanError) return;
           if (status.running) {
             wasRunning = true;
+            _suppressedAiScanError = null;
             set({ aiScanStatus: status });
           } else if (wasRunning || status.error) {
             wasRunning = false;
@@ -418,6 +425,15 @@ export const useStore = create<AppState>((set, get) => ({
       setInterval(poll, 2000);
     };
   })(),
+
+  dismissAiScanError: () => {
+    const current = useStore.getState().aiScanStatus;
+    if (current?.error) {
+      _suppressedAiScanError = current.error;
+      api.clearAiScanError().catch(() => {});
+    }
+    set({ aiScanStatus: null });
+  },
 
   refresh: async () => {
     const result = await api.rescan();
